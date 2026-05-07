@@ -54,7 +54,7 @@ func main() {
 	rdb := redis.NewClient(&redis.Options{
 		Addr: "localhost:6379",
 	})
-        log.Printf("rdb: %v",rdb)
+        log.Printf("Connected to DragonflyDB using: %v",rdb)
         ctx := context.Background()
         rdb.Set(ctx,"otkey","so much for testing",0)
 
@@ -83,13 +83,13 @@ func main() {
 
 			key := fmt.Sprintf("vehicle:%s", item.After.ID)
 			if err := rdb.JSONSet(ctx, key,"$", itemJSON).Err(); err != nil {
-				log.Printf("error writing key %s to Redis: %v", key, err)
+				log.Printf("error writing key %s to DragonflyDB: %v", key, err)
 				continue
 			}
 			written++
 		}
 
-		log.Printf("wrote %d/%d items to Redis", written, len(data.Payload))
+		log.Printf("wrote %d/%d items to DragonflyDB", written, len(data.Payload))
 		w.WriteHeader(http.StatusOK)
 	})
 
