@@ -251,7 +251,7 @@ Time: 6ms total (execution 6ms / network 0ms)
 </p>
 </details>
 
-* Using the CRDB interactive shell (connected to the movr database) update a record so the vehicle is now blue:
+* Using the CRDB interactive shell (connected to the movr database) update a record so the vehicle is now brown:
 
 ```
 demo@127.0.0.1:26257/movr> UPDATE VEHICLES SET ext=jsonb_set(ext, '{color}', '"brown"') WHERE id = 'dddddddd-dddd-4000-8000-00000000000d';
@@ -284,10 +284,12 @@ FT.SEARCH idx_vehicles "@COLOR:{brown}" return 2 CURRENT_STATUS COLOR
 
 START_TIME:
 1778176857 <-- seconds since epoch as known to DragonflyDB
+
 247000 <-- microseconds after the last measured second in above measure
 
 END_TIME:
 1778176857 <-- seconds since epoch as known to DragonflyDB
+
 247000 <-- microseconds after the last measured second in above measure
 
 <details><summary>Sample Commands and Output:</summary>
