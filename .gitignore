@@ -1,3 +1,9 @@
+dragon_bottle.py
+
+# generated certs
+cdcJSONSearch/cert.pem
+cdcJSONSearch/key.pem
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
