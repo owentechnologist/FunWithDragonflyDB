@@ -136,6 +136,51 @@ chmod 755 start_cdc_listener.go
 ./start_cdc_listener.sh
 ```
 
+<details><summary>Expected Output:</summary>
+<p>
+
+```bash
+.....+...+...+..+.........+++++++++++++++++++++++++++++++++++++++++++++*.+..........+............+++++++++++++++++++++++++++++++++++++++++++++*......+............+...+...+..............+...+...................+.....+...................+..+.......+...........+.+.....+....+..+...+............+....+..................+++++
+............+..+.............+...+.....+....+...+..+.+..+...............+....+...+++++++++++++++++++++++++++++++++++++++++++++*..+.....+...+..........+..+....+...........+.......+............+.....+...+...............+++++++++++++++++++++++++++++++++++++++++++++*......+..............+...+.+..+++++
+-----
+2026/05/07 14:43:17 Connected to DragonflyDB using: Redis<localhost:6379 db:0>
+2026/05/07 14:43:17 starting server on port 3000
+2026/05/07 14:43:17 {"payload":[{"after": {"city": "rome", "creation_time": "2019-01-02T03:04:05", "current_location": "63773 Sean Branch", "ext": {"brand": "Santa Cruz", "color": "black"}, "id": "50664625-5628-4c43-a10f-07629f613444", "owner_id": "f0a3d70a-3d70-4000-8000-00000000002f", "status": "available", "type": "bike"}, "key": ["rome", "50664625-5628-4c43-a10f-07629f613444"], "topic": "vehicles", "updated": "1778182996245065000.0000000000"}],"length":1}
+2026/05/07 14:43:17 
+
+data.Payload = [{{rome 2019-01-02T03:04:05 63773 Sean Branch {Santa Cruz black} 50664625-5628-4c43-a10f-07629f613444 f0a3d70a-3d70-4000-8000-00000000002f available bike} [rome 50664625-5628-4c43-a10f-07629f613444] vehicles 1778182996245065000.0000000000}]
+2026/05/07 14:43:17 wrote 1/1 items to DragonflyDB
+2026/05/07 14:43:19 {"payload":[{"after": {"city": "paris", "creation_time": "2019-01-02T03:04:05", "current_location": "49854 Nancy Road Apt. 18", "ext": {"brand": "Santa Cruz", "color": "black"}, "id": "96535cb1-27e6-472e-9156-5c790671b0e0", "owner_id": "1428ff9f-8c91-4566-8220-a4034f868c95", "status": "available", "type": "bike"}, "key": ["paris", "96535cb1-27e6-472e-9156-5c790671b0e0"], "topic": "vehicles", "updated": "1778182999966709000.0000000000"}],"length":1}
+2026/05/07 14:43:19 
+
+data.Payload = [{{paris 2019-01-02T03:04:05 49854 Nancy Road Apt. 18 {Santa Cruz black} 96535cb1-27e6-472e-9156-5c790671b0e0 1428ff9f-8c91-4566-8220-a4034f868c95 available bike} [paris 96535cb1-27e6-472e-9156-5c790671b0e0] vehicles 1778182999966709000.0000000000}]
+2026/05/07 14:43:19 wrote 1/1 items to DragonflyDB
+2026/05/07 14:43:20 {"payload":[{"after": {"city": "rome", "creation_time": "2019-01-02T03:04:05", "current_location": "97968 Robin Island Apt. 65", "ext": {"color": "green"}, "id": "5f00ff12-8e55-4e58-8e8f-eef2efde5d06", "owner_id": "4369c870-b2fc-43ef-9469-cd170737e344", "status": "available", "type": "skateboard"}, "key": ["rome", "5f00ff12-8e55-4e58-8e8f-eef2efde5d06"], "topic": "vehicles", "updated": "1778183000244474000.0000000000"}],"length":1}
+2026/05/07 14:43:20 
+
+data.Payload = [{{rome 2019-01-02T03:04:05 97968 Robin Island Apt. 65 { green} 5f00ff12-8e55-4e58-8e8f-eef2efde5d06 4369c870-b2fc-43ef-9469-cd170737e344 available skateboard} [rome 5f00ff12-8e55-4e58-8e8f-eef2efde5d06] vehicles 1778183000244474000.0000000000}]
+2026/05/07 14:43:20 wrote 1/1 items to DragonflyDB
+2026/05/07 14:43:29 {"payload":[{"after": {"city": "washington dc", "creation_time": "2019-01-02T03:04:05", "current_location": "60698 Ashley Plaza", "ext": {"color": "blue"}, "id": "717018bc-c38a-4aa3-9539-ccf8dc377a98", "owner_id": "da73483c-5d49-48dd-b139-fe47d750218d", "status": "available", "type": "scooter"}, "key": ["washington dc", "717018bc-c38a-4aa3-9539-ccf8dc377a98"], "topic": "vehicles", "updated": "1778183009965660000.0000000000"}],"length":1}
+2026/05/07 14:43:29 
+
+data.Payload = [{{washington dc 2019-01-02T03:04:05 60698 Ashley Plaza { blue} 717018bc-c38a-4aa3-9539-ccf8dc377a98 da73483c-5d49-48dd-b139-fe47d750218d available scooter} [washington dc 717018bc-c38a-4aa3-9539-ccf8dc377a98] vehicles 1778183009965660000.0000000000}]
+2026/05/07 14:43:29 wrote 1/1 items to DragonflyDB
+2026/05/07 14:43:37 {"payload":[{"after": {"city": "los angeles", "creation_time": "2019-01-02T03:04:05", "current_location": "54851 David Knolls Apt. 2", "ext": {"color": "black"}, "id": "e933bd2a-d761-4221-824f-ec544d3acfc2", "owner_id": "605bad70-6208-43e7-9219-1eb47611f4dc", "status": "in_use", "type": "skateboard"}, "key": ["los angeles", "e933bd2a-d761-4221-824f-ec544d3acfc2"], "topic": "vehicles", "updated": "1778183017964585000.0000000000"}],"length":1}
+2026/05/07 14:43:37 
+
+data.Payload = [{{los angeles 2019-01-02T03:04:05 54851 David Knolls Apt. 2 { black} e933bd2a-d761-4221-824f-ec544d3acfc2 605bad70-6208-43e7-9219-1eb47611f4dc in_use skateboard} [los angeles e933bd2a-d761-4221-824f-ec544d3acfc2] vehicles 1778183017964585000.0000000000}]
+2026/05/07 14:43:37 wrote 1/1 items to DragonflyDB
+2026/05/07 14:43:40 {"payload":[{"after": {"city": "amsterdam", "creation_time": "2019-01-02T03:04:05", "current_location": "83247 Wallace View Apt. 42", "ext": {"brand": "Schwinn", "color": "blue"}, "id": "6ad8fa2c-9eb1-4fdd-8c08-eab77acf1cee", "owner_id": "ae147ae1-47ae-4800-8000-000000000022", "status": "in_use", "type": "bike"}, "key": ["amsterdam", "6ad8fa2c-9eb1-4fdd-8c08-eab77acf1cee"], "topic": "vehicles", "updated": "1778183020129929000.0000000000"}],"length":1}
+2026/05/07 14:43:40 
+
+data.Payload = [{{amsterdam 2019-01-02T03:04:05 83247 Wallace View Apt. 42 {Schwinn blue} 6ad8fa2c-9eb1-4fdd-8c08-eab77acf1cee ae147ae1-47ae-4800-8000-000000000022 in_use bike} [amsterdam 6ad8fa2c-9eb1-4fdd-8c08-eab77acf1cee] vehicles 1778183020129929000.0000000000}]
+2026/05/07 14:43:40 wrote 1/1 items to DragonflyDB
+
+```
+</p>
+</details>
+
+
 ## You should see a periodic dump of JSON in the program terminal output and if you query dragonfly you will see the JSON objects now exist:
 
 * Check for new objects in the cache by doing this from the redis-cli interactive shell:
