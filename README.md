@@ -6,7 +6,7 @@ A place to capture sample code and such
 
 ## This version uses a simple listener program that captures changes emitted from CockroachDB, converts them to JSON and writes them to DragonFlyDB.  
 
-### A more robust example would use a highly available CDC solution such as https://debezium.io/documentation/reference/3.5/connectors/index.html
+### A more robust example might use a CDC solution such as https://debezium.io/documentation/reference/3.5/connectors/index.html
 
 # The Flow: 
 
