@@ -2,7 +2,7 @@
 A place to capture sample code and such
 
 # Example 1: 
-# This example showcases the use of the JSON/Search capabilities of DragonnflyDB - It is designed to highlight the syncing of changes propagated through Change Data Capture (CDC). 
+# This example showcases the use of the JSON/Search capabilities of DragonflyDB - It is designed to highlight the syncing of changes propagated through Change Data Capture (CDC). 
 
 ## This version uses a simple listener program that captures changes emitted from CockroachDB, converts them to JSON and writes them to DragonFlyDB.  
 
