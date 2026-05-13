@@ -7,7 +7,7 @@ A place to capture sample code and such
 
 # It involves:
 ## 1. Capturing changes from CRDB (Cockroach Database) and writing them as JSON objects into DragonFlyDB
-## 2. Then Searching DRagonflyDB for JSON objects (vehicles) of a particular color
+## 2. Then Searching DragonflyDB for JSON objects (vehicles) of a particular color
 ## 3. Then updating one record in CockroachDB and searching DragonFlyDB again to see that the CDC has updated the searchable cache as well
 
 # CD to the cdcJSONSearch folder
@@ -189,41 +189,26 @@ data.Payload = [{{amsterdam 2019-01-02T03:04:05 83247 Wallace View Apt. 42 {Schw
 dbsize
 ```
 
-* Using the redis-cli Query for all blue vehicles:
+* Using the redis-cli Query for all vehicles by color:
 
 ```
-FT.SEARCH idx_vehicles "@COLOR:{blue}" return 2 CURRENT_STATUS COLOR
+FT.AGGREGATE idx_vehicles "*" GROUPBY 1 @COLOR REDUCE COUNT 0 AS color_count APPLY "format('%s %s vehicles', @color_count, @COLOR)" AS color_string GROUPBY 1 @color_string SORTBY 2 @color_string ASC
 ```
 <details><summary>Expected Output:</summary>
 <p>
 
 ```bash
- 1) (integer) 5
- 2) "vehicle:dddddddd-dddd-4000-8000-00000000000d"
- 3) 1) "COLOR"
-    2) "blue"
-    3) "CURRENT_STATUS"
-    4) "in_use"
- 4) "vehicle:33333333-3333-4400-8000-000000000003"
- 5) 1) "COLOR"
-    2) "blue"
-    3) "CURRENT_STATUS"
-    4) "in_use"
- 6) "vehicle:55555555-5555-4400-8000-000000000005"
- 7) 1) "COLOR"
-    2) "blue"
-    3) "CURRENT_STATUS"
-    4) "in_use"
- 8) "vehicle:aaaaaaaa-aaaa-4800-8000-00000000000a"
- 9) 1) "COLOR"
-    2) "blue"
-    3) "CURRENT_STATUS"
-    4) "in_use"
-10) "vehicle:eeeeeeee-eeee-4000-8000-00000000000e"
-11) 1) "COLOR"
-    2) "blue"
-    3) "CURRENT_STATUS"
-    4) "in_use"
+1) (integer) 5
+2) 1) "color_string"
+   2) "1886 green vehicles"
+3) 1) "color_string"
+   2) "2009 red vehicles"
+4) 1) "color_string"
+   2) "2015 yellow vehicles"
+5) 1) "color_string"
+   2) "2068 blue vehicles"
+6) 1) "color_string"
+   2) "2106 black vehicles"
 ```
 </p>
 </details>
@@ -261,20 +246,26 @@ demo@127.0.0.1:26257/movr> UPDATE VEHICLES SET ext=jsonb_set(ext, '{color}', '"b
 
 
 ```
-FT.SEARCH idx_vehicles "@COLOR:{brown}" return 2 CURRENT_STATUS COLOR
+FT.AGGREGATE idx_vehicles "*" GROUPBY 1 @COLOR REDUCE COUNT 0 AS color_count APPLY "format('%s %s vehicles', @color_count, @COLOR)" AS color_string GROUPBY 1 @color_string SORTBY 2 @color_string ASC
 ```
-
 <details><summary>Expected Output:</summary>
 <p>
 
 ```bash
-1) (integer) 1
-2) "vehicle:dddddddd-dddd-4000-8000-00000000000d"
-3) 1) "COLOR"
-   2) "brown"
-   3) "CURRENT_STATUS"
-   4) "in_use"
-```
+1) (integer) 6
+2) 1) "color_string"
+   2) "1 brown vehicles"
+3) 1) "color_string"
+   2) "1893 green vehicles"
+4) 1) "color_string"
+   2) "2011 red vehicles"
+5) 1) "color_string"
+   2) "2020 yellow vehicles"
+6) 1) "color_string"
+   2) "2071 blue vehicles"
+7) 1) "color_string"
+   2) "2108 black vehicles"
+   ```
 </p>
 </details>
 
@@ -301,41 +292,28 @@ END_TIME:
 OK
 127.0.0.1:6379(TX)> time
 QUEUED
-127.0.0.1:6379(TX)> FT.SEARCH idx_vehicles "@COLOR:{silver | brown | blue | red}" SORTBY COLOR return 2 CURRENT_STATUS COLOR LIMIT 0 5
+127.0.0.1:6379(TX)> FT.AGGREGATE idx_vehicles "*" GROUPBY 1 @COLOR REDUCE COUNT 0 AS color_count APPLY "format('%s %s vehicles', @color_count, @COLOR)" AS color_string GROUPBY 1 @color_string SORTBY 2 @color_string ASC
 QUEUED
 127.0.0.1:6379(TX)> time
 QUEUED
 127.0.0.1:6379(TX)> exec
-1) 1) (integer) 1778182831
-   2) (integer) 133000
-2)  1) (integer) 132
-    2) "vehicle:71735a29-667f-4c7d-a336-0b2fe83caaa7"
-    3) 1) "COLOR"
-       2) "blue"
-       3) "CURRENT_STATUS"
-       4) "lost"
-    4) "vehicle:f112f454-d0b8-4d64-9f82-3f18fc366479"
-    5) 1) "COLOR"
-       2) "blue"
-       3) "CURRENT_STATUS"
-       4) "available"
-    6) "vehicle:4ac4703c-cc93-49f7-bf50-3a216109e47d"
-    7) 1) "COLOR"
-       2) "blue"
-       3) "CURRENT_STATUS"
-       4) "in_use"
-    8) "vehicle:12191b7d-123a-4d04-959f-1712d99d7396"
-    9) 1) "COLOR"
-       2) "blue"
-       3) "CURRENT_STATUS"
-       4) "in_use"
-   10) "vehicle:a3be738f-44a6-4edb-adb7-e3ca84f72475"
-   11) 1) "COLOR"
-       2) "blue"
-       3) "CURRENT_STATUS"
-       4) "available"
-3) 1) (integer) 1778182831
-   2) (integer) 133000
+1) 1) (integer) 1778656666
+   2) (integer) 370000
+2) 1) (integer) 6
+   2) 1) "color_string"
+      2) "1 brown vehicles"
+   3) 1) "color_string"
+      2) "1895 green vehicles"
+   4) 1) "color_string"
+      2) "2014 red vehicles"
+   5) 1) "color_string"
+      2) "2023 yellow vehicles"
+   6) 1) "color_string"
+      2) "2073 blue vehicles"
+   7) 1) "color_string"
+      2) "2111 black vehicles"
+3) 1) (integer) 1778656666
+   2) (integer) 370000
 ```
 </p>
 </details>

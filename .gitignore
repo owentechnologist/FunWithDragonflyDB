@@ -1,5 +1,7 @@
 dragon_bottle.py
 
+.DS_Store
+/jdbcReadThroughCache/*
 # generated certs
 cdcJSONSearch/cert.pem
 cdcJSONSearch/key.pem
