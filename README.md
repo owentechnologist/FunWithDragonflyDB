@@ -318,4 +318,6 @@ QUEUED
 </p>
 </details>
 
+### OR USE REDIS INSIGHT:
+![IMG of cdc flow](./cdcJSONSearch/DF_AGGQueryDuration.png)
 
