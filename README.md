@@ -2,7 +2,14 @@
 A place to capture sample code and such
 
 # Example 1: 
-# This example uses CockroachDB as the system of record (as well as the source of changes propagated through a simple listener program to DragonFlyDB)
+# This example showcases the use of the JSON/Search capabilities of DragonnflyDB - It is designed to highlight the syncing of changes propagated through Change Data Capture (CDC). 
+
+## This version uses a simple listener program that captures changes emitted from CockroachDB, converts them to JSON and writes them to DragonFlyDB.  
+
+### A more robust example would use a highly available CDC solution such as https://debezium.io/documentation/reference/3.5/connectors/index.html
+
+# The Flow: 
+
 ![IMG of cdc flow](./cdcJSONSearch/cdcJSONSearch.png)
 
 # It involves:
