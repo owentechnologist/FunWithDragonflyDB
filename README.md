@@ -277,50 +277,27 @@ FT.AGGREGATE idx_vehicles "*" GROUPBY 1 @COLOR REDUCE COUNT 0 AS color_count APP
 </details>
 
 ## Look at the latency for such a query against local DragonflyDB:
-* execute multi/time/command/time/execute to see the time taken for the command
-* subtract the first time from the second time to see how many microseconds it took
-
-START_TIME:
-1778176857 <-- seconds since epoch as known to DragonflyDB
-
-247000 <-- microseconds after the last measured second in above measure
-
-END_TIME:
-1778176857 <-- seconds since epoch as known to DragonflyDB
-
-247000 <-- microseconds after the last measured second in above measure
+* execute command_timer.sh providing the port number for your local instance and the command to be timed:
 
 <details><summary>Sample Commands and Output:</summary>
 <p>
 
 ```bash
+ ./command_timer.sh 6379 FT.AGGREGATE idx_vehicles "*" GROUPBY 1 @COLOR REDUCE COUNT 0 AS color_count APPLY "format('%s %s vehicles', @color_count, @COLOR)" AS color_string GROUPBY 1 @color_string SORTBY 2 @color_string ASC
+1) (integer) 5
+2) 1) "color_string"
+   2) "3243 green vehicles"
+3) 1) "color_string"
+   2) "3285 red vehicles"
+4) 1) "color_string"
+   2) "3316 yellow vehicles"
+5) 1) "color_string"
+   2) "3367 blue vehicles"
+6) 1) "color_string"
+   2) "3401 black vehicles"
 
-127.0.0.1:6379> multi
-OK
-127.0.0.1:6379(TX)> time
-QUEUED
-127.0.0.1:6379(TX)> FT.AGGREGATE idx_vehicles "*" GROUPBY 1 @COLOR REDUCE COUNT 0 AS color_count APPLY "format('%s %s vehicles', @color_count, @COLOR)" AS color_string GROUPBY 1 @color_string SORTBY 2 @color_string ASC
-QUEUED
-127.0.0.1:6379(TX)> time
-QUEUED
-127.0.0.1:6379(TX)> exec
-1) 1) (integer) 1778656666
-   2) (integer) 370000
-2) 1) (integer) 6
-   2) 1) "color_string"
-      2) "1 brown vehicles"
-   3) 1) "color_string"
-      2) "1895 green vehicles"
-   4) 1) "color_string"
-      2) "2014 red vehicles"
-   5) 1) "color_string"
-      2) "2023 yellow vehicles"
-   6) 1) "color_string"
-      2) "2073 blue vehicles"
-   7) 1) "color_string"
-      2) "2111 black vehicles"
-3) 1) (integer) 1778656666
-   2) (integer) 370000
+Time taken: 0.031188s
+
 ```
 </p>
 </details>
