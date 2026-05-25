@@ -5,6 +5,7 @@ dragon_bottle.py
 # generated certs
 cdcJSONSearch/cert.pem
 cdcJSONSearch/key.pem
+/memoryBenchmarkScript/bmenv/*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

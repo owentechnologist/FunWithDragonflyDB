@@ -1,0 +1,76 @@
+**Memory Benchmark Script — Specification**
+
+**Purpose:** Compare memory utilization between Dragonfly and Redis/Valkey across all supported data types.
+
+**Requirements:** Python 3.8+, redis-py, tabulate (optional)
+
+**Data Types Benchmarked (defaults):**
+Strings      (10M keys, uses DEBUG POPULATE; falls back to pipelined SET if unavailable)
+Hashes       (500K keys, 10 fields × 32B)
+Lists        (500K keys, 10 elements × 32B)
+Sets         (500K keys, 15 members × 24B)
+Sorted Sets  (500K keys, 15 members × 24B)
+Streams      (500K keys, 5 entries × 32B values)
+HyperLogLog  (tracks string key count by default, 100 elements per key; override with --hll-keys)
+JSON         (500K keys, disabled by default — requires --enable-json and RedisJSON module)
+
+**JSON Depth Modes** (--json-depth):
+flat   — ~370B, simple {field: value} object
+medium — ~500B, zoo schedule with nested contacts/arrays
+deep   — ~4.7KB, zoo + medical records with embedded vet/facility/recovery histories
+all    — runs flat, medium, and deep as three separate rows in the report
+
+**How It Works:**
+1. Single FLUSHALL at the start of each instance run (all type keys accumulate and persist)
+2. Record baseline used_memory from INFO MEMORY
+3. Populate each type via pipelined commands (or DEBUG POPULATE for strings when no TTL is set)
+4. Wait 1s for memory accounting to settle
+5. Measure used_memory delta vs. end of previous type (running delta, not absolute)
+6. After all types are populated, pause and prompt user to inspect data before printing the report
+7. Report per-type: memory, bytes/key, savings %, ratio
+
+**Key CLI Flags:**
+--dragonfly-port / --redis-port          (defaults: 6379 / 6380)
+--dragonfly-host / --redis-host          (defaults: localhost)
+--dragonfly-password / --redis-password
+--dragonfly-tls                          (enable TLS for Dragonfly connection)
+--dragonfly-tls-ca-cert PATH             (CA cert for server verification)
+--dragonfly-tls-cert PATH                (client cert for Dragonfly mTLS)
+--dragonfly-tls-key PATH                 (client key for Dragonfly mTLS)
+--redis-tls / --redis-tls-ca-cert / --redis-tls-cert / --redis-tls-key  (same for Redis/Valkey)
+--redis-label LABEL                      (custom label in reports, default: "Redis/Valkey")
+--dragonfly-only / --redis-only          (skip the other instance)
+--scale N                                (0.1 = 10% of default counts, 5 = 5x; min 1000 keys)
+--types strings hashes json ...          (select specific types to run)
+--enable-json + --json-depth all
+--string-keys N, --hash-keys N, --list-keys N, --set-keys N, --zset-keys N,
+  --stream-keys N, --hll-keys N, --json-keys N  (per-type key count overrides; also enables that type)
+--value-size N                           (override value size for all types, bytes)
+--hash-fields N                          (fields per hash)
+--list-elements N                        (elements per list)
+--set-members N                          (members per set)
+--zset-members N                         (members per sorted set)
+--container-children-count N             (overrides num_fields for streams, hashes, lists, sets, sorted_sets)
+--pipeline-batch N                       (commands per pipeline flush, default 5000)
+--ttl N                                  (TTL in seconds applied to all keys, default 3600; 0 = no expiry)
+
+**Output:**
+- Two-instance run: side-by-side comparison table (Redis as column A, Dragonfly as column B).
+  Columns: Type, Keys, Redis Memory, Redis B/key, Dragonfly Memory, Dragonfly B/key, Savings %, Ratio.
+  Savings = how much less Dragonfly uses vs Redis (positive = Dragonfly smaller).
+  Ratio = Redis memory / Dragonfly memory (higher = Dragonfly more efficient).
+  TOTAL row at bottom.
+- Single-instance run: table with Type, Keys, Total Elements, Memory, B/key, B/element, Time.
+
+**JSON document samples:**
+
+**Flat (~370B):**
+{"field0":"aB3kQ9xmRt7wLpYn2cDfVj8sHg6","field1":"mN5vXo1eUk4zTr9yJb7wCf2qAh3s",...}
+
+**Medium (~500B):**
+{"times":[{"military":"0800","civilian":"8 AM"},...],"responsible_parties":{"number_of_contacts":2,"hosts":[{"phone":"715-876-5500","name":"Duncan Mills 0","email":"dmills0@zew.org"},{"phone":"815-336-5500","name":"Xiria Andrus 0","email":"xiriaa0@zew.org"}]},"cost":0,"name":"Gorilla Feeding #0","days":["Mon","Tue","Wed","Thu","Fri","Sat","Sun"],"location":"Gorilla House South"}
+
+**Deep (~4.7KB):**
+Zoo event + medical_records with 3–7 cases per key (varies by key index). Each case has nested
+treatment → facility → contact and optionally attending_veterinarian → emergency_contact chains,
+plus recovery_progress_history arrays.
