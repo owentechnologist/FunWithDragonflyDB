@@ -80,13 +80,14 @@ python memory_benchmark.py --redis-label Stack --enable-json --redis-port 10000
 
 # Sample run: (summary section)
 
-<details><summary>Sample Output:</summary>
-<p>
+```BASH
+python3 memory_benchmark.py --enable-json --json-depth all --redis-port 10000 --redis-label Stack --ttl 300 --container-children-count 200 --dragonfly-host myhost.com --dragonfly-password yummypassword --dragonfly-tls --dragonfly-port 6385 --scale .0025
 ```
 
-python3 memory_benchmark.py --enable-json --json-depth all --redis-port 10000 --redis-label Stack --ttl 300 --container-children-count 200 --dragonfly-host myhost.com --dragonfly-password yummypassword --dragonfly-tls --dragonfly-port 6385 --scale .0025
+<details><summary>Sample Output:</summary>
+<p>
 
-...
+```
 
 ==========================================================================================
  MEMORY COMPARISON: Stack vs Dragonfly
@@ -124,13 +125,21 @@ python3 memory_benchmark.py --enable-json --json-depth all --redis-port 10000 --
 
 Done.
 ```
+
+
 </details>
 
-**And a run where no JSON keys are written**
-<details><summary>Sample Output:</summary>
-<p>
-```
+
+## And a run where no JSON keys are written
+
+```BASH
  python3 memory_benchmark.py --redis-port 10000 --redis-label Stack --ttl 300 --dragonfly-host mycloud.com --dragonfly-password yummypassword --dragonfly-tls --dragonfly-port 6385 --scale .25
+```
+
+<details><summary>Sample Output 2:</summary>
+<p>
+
+```
 ==========================================================================================
  MEMORY COMPARISON: Stack vs Dragonfly
 ==========================================================================================
@@ -161,6 +170,7 @@ Done.
 
 Done.
 ```
+
 </details>
 
 Everything is configurable — key counts, value sizes, field counts, pipeline batch size, and you can --scale 5 for a large run or --scale 0.001 for a quick sanity check. Keys are written with TTL of 1 hour by default (example above uses 5 min). The output reports per-type memory delta, bytes/key, savings %, and ratio.
