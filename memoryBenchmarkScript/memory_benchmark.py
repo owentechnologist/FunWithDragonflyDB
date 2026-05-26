@@ -5,7 +5,7 @@ Memory Benchmark: Dragonfly vs Redis/Valkey
 Populates millions of objects across all supported data types and compares
 memory utilization between Dragonfly and Redis/Valkey.
 
-Requirements: redis tabulate (see requirements.txt)
+Requirements: pip install redis tabulate
 
 Usage:
   python memory_benchmark.py # Use defaults (localhost:6379 vs localhost:6380)
@@ -654,8 +654,13 @@ def print_comparison(
         total_a += ra.memory_bytes
         total_b += rb.memory_bytes
 
-        if ra.memory_bytes > 0 and rb.memory_bytes > 0:
-            # Savings = how much less B uses vs A (positive = B is smaller)
+        a_neg = ra.memory_bytes < 0
+        b_neg = rb.memory_bytes < 0
+
+        if a_neg or b_neg:
+            savings_str = "data store memory event occurred"
+            ratio_str = "N/A"
+        elif ra.memory_bytes > 0 and rb.memory_bytes > 0:
             savings_pct = (1 - rb.memory_bytes / ra.memory_bytes) * 100
             ratio = ra.memory_bytes / rb.memory_bytes
             savings_str = f"{savings_pct:+.1f}%"
@@ -667,10 +672,10 @@ def print_comparison(
         rows.append([
             t,
             f"{ra.num_keys:,}",
-            human_bytes(ra.memory_bytes),
-            f"{ra.bytes_per_key:.1f}",
-            human_bytes(rb.memory_bytes),
-            f"{rb.bytes_per_key:.1f}",
+            "< 0 (artifact)" if a_neg else human_bytes(ra.memory_bytes),
+            "—" if a_neg else f"{ra.bytes_per_key:.1f}",
+            "< 0 (artifact)" if b_neg else human_bytes(rb.memory_bytes),
+            "—" if b_neg else f"{rb.bytes_per_key:.1f}",
             savings_str,
             ratio_str,
         ])
