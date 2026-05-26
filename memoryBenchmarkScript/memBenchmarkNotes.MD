@@ -130,10 +130,10 @@ Done.
 </details>
 
 
-## And a run where no JSON keys are written
+## And a larger run where no JSON keys are written (note with a large number of keys it is important to avoid expirations from occurring in the middle of the load so set the TTL accordingly or risk seeing memory anomalies)
 
 ```BASH
- python3 memory_benchmark.py --redis-port 10000 --redis-label Stack --ttl 300 --dragonfly-host mycloud.com --dragonfly-password yummypassword --dragonfly-tls --dragonfly-port 6385 --scale .25
+ python3 memory_benchmark.py --redis-port 10000 --redis-label Stack --ttl 600 --dragonfly-host mycloud.com --dragonfly-password yummypassword --dragonfly-tls --dragonfly-port 6385 --scale .25
 ```
 
 <details><summary>Sample Output 2:</summary>
