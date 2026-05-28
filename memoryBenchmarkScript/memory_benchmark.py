@@ -26,9 +26,15 @@ Usage:
       --dragonfly-tls-ca-cert /path/to/ca.crt \\
       --dragonfly-tls-cert /path/to/client.crt \\
       --dragonfly-tls-key /path/to/client.key
+
+  # Container-children sweep — track how memory scales as children grow:
+  python memory_benchmark.py --dragonfly-only --container-children-count 200 --repeat 4
+  # Dense upper-range sweep — extra fine-grained samples near the maximum:
+  python memory_benchmark.py --dragonfly-only --container-children-count 1000 --repeat 10 --repeat 10
 """
 
 import argparse
+import copy
 import json
 import math
 import random
@@ -172,21 +178,24 @@ def progress_bar(current: int, total: int, width: int = 40, prefix: str = "") ->
 # POPULATION FUNCTIONS — One per type
 # =============================================================================
 
-def populate_strings(client: redis.Redis, cfg: TypeConfig, key_prefix: str = "str", ttl: int = 0) -> int:
+def populate_strings(client: redis.Redis, cfg: TypeConfig, key_prefix: str = "str", ttl: int = 0, verbose: bool = True) -> int:
     """
     Populate string keys. Uses DEBUG POPULATE for maximum speed when no TTL is set.
     Falls back to pipelined SET (with EX when TTL is set) otherwise.
     """
-    print(f" Populating {cfg.num_keys:,} strings (value_size={cfg.value_size})...")
+    if verbose:
+        print(f" Populating {cfg.num_keys:,} strings (value_size={cfg.value_size})...")
     if ttl <= 0:
         try:
             # DEBUG POPULATE <count> <prefix> <value_size>
             client.execute_command("DEBUG", "POPULATE", cfg.num_keys, key_prefix, cfg.value_size)
-            print(f" ✓ Used DEBUG POPULATE")
+            if verbose:
+                print(f" ✓ Used DEBUG POPULATE")
             return cfg.num_keys
         except redis.ResponseError as e:
             if "unknown" in str(e).lower() or "debug" in str(e).lower():
-                print(f" DEBUG POPULATE unavailable, falling back to pipelined SET...")
+                if verbose:
+                    print(f" DEBUG POPULATE unavailable, falling back to pipelined SET...")
             else:
                 raise
 
@@ -198,15 +207,18 @@ def populate_strings(client: redis.Redis, cfg: TypeConfig, key_prefix: str = "st
         pipe.set(f"{key_prefix}:{i}", value, **set_kwargs)
         if (i + 1) % cfg.pipeline_batch == 0:
             pipe.execute()
-            print(progress_bar(i + 1, cfg.num_keys, prefix="SET "), end="", flush=True)
+            if verbose:
+                print(progress_bar(i + 1, cfg.num_keys, prefix="SET "), end="", flush=True)
     pipe.execute()
-    print()
+    if verbose:
+        print()
     return cfg.num_keys
 
-def populate_hashes(client: redis.Redis, cfg: TypeConfig, key_prefix: str = "hash", ttl: int = 0) -> int:
+def populate_hashes(client: redis.Redis, cfg: TypeConfig, key_prefix: str = "hash", ttl: int = 0, verbose: bool = True) -> int:
     """Populate hash keys with N fields each."""
     total = cfg.num_keys
-    print(f" Populating {total:,} hashes ({cfg.num_fields} fields × {cfg.value_size}B values)...")
+    if verbose:
+        print(f" Populating {total:,} hashes ({cfg.num_fields} fields × {cfg.value_size}B values)...")
 
     pipe = client.pipeline(transaction=False)
     fields = {f"f{j}": random_value(cfg.value_size) for j in range(cfg.num_fields)}
@@ -218,15 +230,18 @@ def populate_hashes(client: redis.Redis, cfg: TypeConfig, key_prefix: str = "has
             pipe.expire(key, ttl)
         if (i + 1) % cfg.pipeline_batch == 0:
             pipe.execute()
-            print(progress_bar(i + 1, total, prefix="HSET "), end="", flush=True)
+            if verbose:
+                print(progress_bar(i + 1, total, prefix="HSET "), end="", flush=True)
     pipe.execute()
-    print()
+    if verbose:
+        print()
     return total
 
-def populate_lists(client: redis.Redis, cfg: TypeConfig, key_prefix: str = "list", ttl: int = 0) -> int:
+def populate_lists(client: redis.Redis, cfg: TypeConfig, key_prefix: str = "list", ttl: int = 0, verbose: bool = True) -> int:
     """Populate list keys with N elements each."""
     total = cfg.num_keys
-    print(f" Populating {total:,} lists ({cfg.num_fields} elements × {cfg.value_size}B)...")
+    if verbose:
+        print(f" Populating {total:,} lists ({cfg.num_fields} elements × {cfg.value_size}B)...")
 
     pipe = client.pipeline(transaction=False)
     elements = [random_value(cfg.value_size) for _ in range(cfg.num_fields)]
@@ -238,15 +253,18 @@ def populate_lists(client: redis.Redis, cfg: TypeConfig, key_prefix: str = "list
             pipe.expire(key, ttl)
         if (i + 1) % cfg.pipeline_batch == 0:
             pipe.execute()
-            print(progress_bar(i + 1, total, prefix="RPUSH "), end="", flush=True)
+            if verbose:
+                print(progress_bar(i + 1, total, prefix="RPUSH "), end="", flush=True)
     pipe.execute()
-    print()
+    if verbose:
+        print()
     return total
 
-def populate_sets(client: redis.Redis, cfg: TypeConfig, key_prefix: str = "set", ttl: int = 0) -> int:
+def populate_sets(client: redis.Redis, cfg: TypeConfig, key_prefix: str = "set", ttl: int = 0, verbose: bool = True) -> int:
     """Populate set keys with N members each."""
     total = cfg.num_keys
-    print(f" Populating {total:,} sets ({cfg.num_fields} members × {cfg.value_size}B)...")
+    if verbose:
+        print(f" Populating {total:,} sets ({cfg.num_fields} members × {cfg.value_size}B)...")
 
     pipe = client.pipeline(transaction=False)
     members = [random_value(cfg.value_size) for _ in range(cfg.num_fields)]
@@ -258,15 +276,18 @@ def populate_sets(client: redis.Redis, cfg: TypeConfig, key_prefix: str = "set",
             pipe.expire(key, ttl)
         if (i + 1) % cfg.pipeline_batch == 0:
             pipe.execute()
-            print(progress_bar(i + 1, total, prefix="SADD "), end="", flush=True)
+            if verbose:
+                print(progress_bar(i + 1, total, prefix="SADD "), end="", flush=True)
     pipe.execute()
-    print()
+    if verbose:
+        print()
     return total
 
-def populate_sorted_sets(client: redis.Redis, cfg: TypeConfig, key_prefix: str = "zset", ttl: int = 0) -> int:
+def populate_sorted_sets(client: redis.Redis, cfg: TypeConfig, key_prefix: str = "zset", ttl: int = 0, verbose: bool = True) -> int:
     """Populate sorted set keys with N scored members each."""
     total = cfg.num_keys
-    print(f" Populating {total:,} sorted sets ({cfg.num_fields} members × {cfg.value_size}B)...")
+    if verbose:
+        print(f" Populating {total:,} sorted sets ({cfg.num_fields} members × {cfg.value_size}B)...")
 
     pipe = client.pipeline(transaction=False)
     # Build {member: score} mapping
@@ -279,16 +300,19 @@ def populate_sorted_sets(client: redis.Redis, cfg: TypeConfig, key_prefix: str =
             pipe.expire(key, ttl)
         if (i + 1) % cfg.pipeline_batch == 0:
             pipe.execute()
-            print(progress_bar(i + 1, total, prefix="ZADD "), end="", flush=True)
+            if verbose:
+                print(progress_bar(i + 1, total, prefix="ZADD "), end="", flush=True)
     pipe.execute()
-    print()
+    if verbose:
+        print()
     return total
 
-def populate_streams(client: redis.Redis, cfg: TypeConfig, key_prefix: str = "stream", ttl: int = 0) -> int:
+def populate_streams(client: redis.Redis, cfg: TypeConfig, key_prefix: str = "stream", ttl: int = 0, verbose: bool = True) -> int:
     """Populate stream keys with N entries each."""
     total = cfg.num_keys
     entries_per = cfg.num_fields
-    print(f" Populating {total:,} streams ({entries_per} entries, {cfg.value_size}B values)...")
+    if verbose:
+        print(f" Populating {total:,} streams ({entries_per} entries, {cfg.value_size}B values)...")
 
     pipe = client.pipeline(transaction=False)
     entry_fields = {"field1": random_value(cfg.value_size), "field2": random_value(cfg.value_size)}
@@ -301,19 +325,23 @@ def populate_streams(client: redis.Redis, cfg: TypeConfig, key_prefix: str = "st
             pipe.expire(key, ttl)
         if (i + 1) % (cfg.pipeline_batch // max(entries_per, 1)) == 0:
             pipe.execute()
-            print(progress_bar(i + 1, total, prefix="XADD "), end="", flush=True)
+            if verbose:
+                print(progress_bar(i + 1, total, prefix="XADD "), end="", flush=True)
     pipe.execute()
-    print()
+    if verbose:
+        print()
     return total
 
-def populate_hyperloglog(client: redis.Redis, cfg: TypeConfig, key_prefix: str = "hll", ttl: int = 0) -> int:
-    """Populate HyperLogLog keys with N element additions each."""
+def populate_hyperloglog(client: redis.Redis, cfg: TypeConfig, key_prefix: str = "hll", ttl: int = 0, verbose: bool = True) -> int:
+    """Populate HyperLogLog keys with N/10 element additions each."""
     total = cfg.num_keys
-    print(f" Populating {total:,} HyperLogLogs ({cfg.num_fields} elements each)...")
+    fields_per_key = round(cfg.num_fields / 10)
+    if verbose:
+        print(f" Populating {total:,} HyperLogLogs ({fields_per_key} elements each)...")
 
     pipe = client.pipeline(transaction=False)
     # Pre-generate element batches
-    elements = [random_value(16) for _ in range(cfg.num_fields)]
+    elements = [random_value(16) for _ in range(fields_per_key)]
 
     for i in range(total):
         key = f"{key_prefix}:{i}"
@@ -322,9 +350,11 @@ def populate_hyperloglog(client: redis.Redis, cfg: TypeConfig, key_prefix: str =
             pipe.expire(key, ttl)
         if (i + 1) % cfg.pipeline_batch == 0:
             pipe.execute()
-            print(progress_bar(i + 1, total, prefix="PFADD "), end="", flush=True)
+            if verbose:
+                print(progress_bar(i + 1, total, prefix="PFADD "), end="", flush=True)
     pipe.execute()
-    print()
+    if verbose:
+        print()
     return total
 
 def _make_medium_doc(idx: int) -> dict:
@@ -432,21 +462,24 @@ def _make_deep_doc(idx: int) -> dict:
     }
 
 
-def populate_json(client: redis.Redis, cfg: TypeConfig, key_prefix: str = "", ttl: int = 0) -> int:
+def populate_json(client: redis.Redis, cfg: TypeConfig, key_prefix: str = "", ttl: int = 0, verbose: bool = True) -> int:
     """Populate JSON keys (requires RedisJSON module)."""
     total = cfg.num_keys
     depth = cfg.json_depth
     key_prefix = key_prefix or f"json_{depth}"
 
     if depth == "medium":
-        print(f" Populating {total:,} JSON docs (medium ~500B, zoo schedule)...")
+        if verbose:
+            print(f" Populating {total:,} JSON docs (medium ~500B, zoo schedule)...")
         docs = [json.dumps(_make_medium_doc(0))]
     elif depth == "deep":
-        print(f" Populating {total:,} JSON docs (deep ~4.7KB, zoo + medical records)...")
+        if verbose:
+            print(f" Populating {total:,} JSON docs (deep ~4.7KB, zoo + medical records)...")
         # Pre-generate 5 docs covering case counts 3–7, then cycle
         docs = [json.dumps(_make_deep_doc(idx)) for idx in range(5)]
     else:  # flat
-        print(f" Populating {total:,} JSON docs (flat ~370B, {cfg.num_fields} fields × {cfg.value_size}B)...")
+        if verbose:
+            print(f" Populating {total:,} JSON docs (flat ~370B, {cfg.num_fields} fields × {cfg.value_size}B)...")
         docs = [json.dumps({f"field{j}": random_value(cfg.value_size) for j in range(cfg.num_fields)})]
 
     pipe = client.pipeline(transaction=False)
@@ -459,9 +492,11 @@ def populate_json(client: redis.Redis, cfg: TypeConfig, key_prefix: str = "", tt
             pipe.expire(key, ttl)
         if (i + 1) % cfg.pipeline_batch == 0:
             pipe.execute()
-            print(progress_bar(i + 1, total, prefix="JSON.SET "), end="", flush=True)
+            if verbose:
+                print(progress_bar(i + 1, total, prefix="JSON.SET "), end="", flush=True)
     pipe.execute()
-    print()
+    if verbose:
+        print()
     return total
 
 # Map type names to their populate functions
@@ -513,12 +548,14 @@ def benchmark_instance(
     tls_ca_cert: Optional[str] = None,
     tls_cert: Optional[str] = None,
     tls_key: Optional[str] = None,
+    verbose: bool = True,
 ) -> dict[str, TypeResult]:
     """Run the full benchmark against one instance."""
-    tls_info = " [TLS]" if tls else ""
-    print(f"\n{'='*70}")
-    print(f" Benchmarking: {label} ({host}:{port}){tls_info}")
-    print(f"{'='*70}")
+    if verbose:
+        tls_info = " [TLS]" if tls else ""
+        print(f"\n{'='*70}")
+        print(f" Benchmarking: {label} ({host}:{port}){tls_info}")
+        print(f"{'='*70}")
 
     ssl_kwargs: dict = {}
     if tls:
@@ -541,7 +578,8 @@ def benchmark_instance(
         server_version = info.get("redis_version", info.get(b"redis_version", b"unknown"))
         if isinstance(server_version, bytes):
             server_version = server_version.decode()
-        print(f" Server version: {server_version}")
+        if verbose:
+            print(f" Server version: {server_version}")
     except Exception as e:
         print(f" ✗ Cannot connect to {host}:{port}")
         print(f"   Error type : {type(e).__name__}")
@@ -576,16 +614,18 @@ def benchmark_instance(
             continue
 
         if type_name == "json" and not has_json:
-            print(f"\n [{type_name.upper()}] Skipped — RedisJSON module not loaded")
+            if verbose:
+                print(f"\n [{type_name.upper()}] Skipped — RedisJSON module not loaded")
             results[type_name] = TypeResult(type_name, 0, 0, 0, 0, skipped=True, skip_reason="no module")
             continue
 
-        print(f"\n [{type_name.upper()}]")
+        if verbose:
+            print(f"\n [{type_name.upper()}]")
 
         baseline = prev_mem
 
         t0 = time.time()
-        num_keys = POPULATORS[type_name](client, cfg, ttl=ttl)
+        num_keys = POPULATORS[type_name](client, cfg, ttl=ttl, verbose=verbose)
         elapsed = time.time() - t0
 
         time.sleep(1.0) # Let memory accounting settle
@@ -603,8 +643,9 @@ def benchmark_instance(
             time_seconds=elapsed,
         )
 
-        print(f" ✓ {num_keys:,} keys | Memory: {human_bytes(delta)} | "
-              f"{results[type_name].bytes_per_key:.1f} B/key | {elapsed:.1f}s")
+        if verbose:
+            print(f" ✓ {num_keys:,} keys | Memory: {human_bytes(delta)} | "
+                  f"{results[type_name].bytes_per_key:.1f} B/key | {elapsed:.1f}s")
 
     client.close()
     return results
@@ -661,7 +702,7 @@ def print_comparison(
             savings_str = "data store memory event occurred"
             ratio_str = "N/A"
         elif ra.memory_bytes > 0 and rb.memory_bytes > 0:
-            savings_pct = (1 - rb.memory_bytes / ra.memory_bytes) * 100
+            savings_pct = (1 - ra.memory_bytes / rb.memory_bytes) * 100
             ratio = ra.memory_bytes / rb.memory_bytes
             savings_str = f"{savings_pct:+.1f}%"
             ratio_str = f"{ratio:.2f}x"
@@ -682,7 +723,7 @@ def print_comparison(
 
     # Totals row
     if total_a > 0 and total_b > 0:
-        total_savings = (1 - total_b / total_a) * 100
+        total_savings = (1 - total_a / total_b) * 100
         total_ratio = total_a / total_b
         rows.append([
             "TOTAL", "—",
@@ -703,8 +744,8 @@ def print_comparison(
             print(f" {r[0]:<14} {r[1]:>12} {r[2]:>14} {r[3]:>8} "
                   f"{r[4]:>14} {r[5]:>8} {r[6]:>10} {r[7]:>8}")
 
-    print(f"\n Savings = how much less {label_b} uses vs {label_a}")
-    print(f" Ratio = {label_a} memory / {label_b} memory (higher = {label_b} more efficient)\n")
+    print(f"\n Savings = how much less {label_a} uses vs {label_b} [higher savings is better]")
+    print(f" Ratio = {label_a} memory / {label_b} memory (lower percentage = {label_a} more efficient)\n")
 
 def print_single_report(label: str, results: dict[str, TypeResult], type_order: list[str]):
     """Print results for a single instance."""
@@ -740,6 +781,275 @@ def print_single_report(label: str, results: dict[str, TypeResult], type_order: 
             print(f" {r[0]:<14} {r[1]:>12} {r[2]:>16} {r[3]:>14} {r[4]:>8} {r[5]:>10} {r[6]:>8}")
 
 # =============================================================================
+# SWEEP ANALYSIS — Container-children growth impact
+# =============================================================================
+
+def compute_children_sequence(
+    max_children: int,
+    num_repeats: int,
+    second_repeat: Optional[int] = None,
+) -> list[int]:
+    """
+    Compute the ordered sequence of children counts for a sweep.
+
+    Denominators = [max_children, num_repeats-1, num_repeats-2, ..., 2, 1]
+    This gives a minimum case (max/max = 1 child) followed by num_repeats-1
+    progressively larger counts up to max_children.
+
+    num_repeats is capped at max_children to prevent the denominator list from
+    including values that would only produce duplicates.  Deduplication is applied
+    after rounding so that the actual step count may be less than num_repeats when
+    the ratio max_children/N produces collisions.
+
+    When second_repeat is given, an additional second_repeat fine-grained steps are
+    inserted in the upper range (max_children/2, max_children) using fractional
+    denominators 1+step, 1+2*step, ..., 1+(N-1)*step, 1+(N-1)*step+step/2 where
+    step = 1/second_repeat.  This produces denser sampling near the maximum.
+
+    Examples (single repeat):
+      max=200, N=4 → denominators=[200,3,2,1] → [1, 67, 100, 200]
+      max=200, N=2 → denominators=[200,1]     → [1, 200]
+      max=5,   N=4 → denominators=[5,3,2,1]   → [1, 2, 3, 5]
+
+    Example (with second_repeat=10, max=1000, num_repeats=10):
+      Base:  [1, 100, 111, 125, 143, 167, 200, 250, 333, 500, 1000]
+      Upper: adds ~909, 833, 769, 714, 667, 625, 588, 556, 526, 513
+    """
+    n = min(num_repeats, max_children)
+    n = max(n, 1)
+    denominators = [max_children] + list(range(n - 1, 0, -1))
+    seen: set[int] = set()
+    sequence: list[int] = []
+    for d in denominators:
+        count = max(1, round(max_children / d))
+        if count not in seen:
+            seen.add(count)
+            sequence.append(count)
+
+    if second_repeat is not None and second_repeat > 0:
+        n2 = second_repeat
+        step = 1.0 / n2
+        upper_denoms = [1.0 + i * step for i in range(1, n2)]
+        upper_denoms.append(1.0 + (n2 - 1) * step + step / 2)
+        for d in upper_denoms:
+            count = max(1, round(max_children / d))
+            if count not in seen:
+                seen.add(count)
+                sequence.append(count)
+        sequence.sort()
+
+    return sequence
+
+
+def print_sweep_report(
+    sweep_results: dict,
+    sequence: list[int],
+    type_order: list[str],
+    label_a: str,
+    label_b: Optional[str] = None,
+) -> None:
+    """
+    Print per-type memory progression tables from a container-children sweep.
+
+    For container types (hashes, lists, sets, sorted_sets, streams) prints one
+    table per server showing Memory, B/key, vs-prev-step, and vs-min-step columns.
+    When two servers are present, also prints a savings-trend table per type.
+    Non-container types (strings, hyperloglog, json variants) are omitted because
+    their memory is unaffected by the children count.
+    """
+    CONTAINER_TYPES = {"hashes", "lists", "sets", "sorted_sets", "streams"}
+    sweep_types = [t for t in type_order if t in CONTAINER_TYPES]
+
+    all_labels = [label_a] if label_b is None else [label_a, label_b]
+
+    print(f"\n{'='*70}")
+    print(f" CONTAINER-CHILDREN SWEEP REPORT")
+    print(f" Children sequence: {' → '.join(str(c) for c in sequence)}")
+    print(f"{'='*70}")
+
+    for type_name in sweep_types:
+        print(f"\n  [{type_name.upper()}]")
+
+        for server_label in all_labels:
+            server_data = sweep_results.get(server_label, {})
+            rows = []
+            prev_mem: Optional[int] = None
+            min_mem: Optional[int] = None
+
+            # Determine key count from first successful result for the header
+            num_keys = 0
+            for c in sequence:
+                r = server_data.get(c, {}).get(type_name)
+                if r and not r.skipped:
+                    num_keys = r.num_keys
+                    break
+
+            for children in sequence:
+                result = server_data.get(children, {}).get(type_name)
+                if result is None or result.skipped or result.memory_bytes <= 0:
+                    rows.append([f"{children:,}", "—", "—", "—", "—"])
+                    prev_mem = None
+                    continue
+
+                mem = result.memory_bytes
+                bpk = result.bytes_per_key
+
+                if min_mem is None:
+                    min_mem = mem
+
+                if prev_mem is not None and prev_mem > 0:
+                    vs_prev = f"{mem / prev_mem:.2f}x"
+                else:
+                    vs_prev = "—"
+
+                if min_mem is not None and min_mem > 0 and mem != min_mem:
+                    vs_min = f"{mem / min_mem:.2f}x"
+                else:
+                    vs_min = "1.00x" if mem == min_mem else "—"
+
+                rows.append([f"{children:,}", human_bytes(mem), f"{bpk:.1f}", vs_prev, vs_min])
+                prev_mem = mem
+
+            headers = ["Children", "Memory", "B/key", "vs prev", "vs min"]
+            print(f"\n    {server_label}  ({num_keys:,} keys × N children)")
+            if tabulate:
+                print(tabulate(rows, headers=headers, tablefmt="rounded_grid", stralign="right"))
+            else:
+                print(f"    {'Children':>10}  {'Memory':>12}  {'B/key':>8}  {'vs prev':>8}  {'vs min':>8}")
+                print("    " + "-" * 56)
+                for r in rows:
+                    print(f"    {r[0]:>10}  {r[1]:>12}  {r[2]:>8}  {r[3]:>8}  {r[4]:>8}")
+
+        # Cross-server savings trend when two servers are present
+        if label_b is not None:
+            data_a = sweep_results.get(label_a, {})
+            data_b = sweep_results.get(label_b, {})
+            rows2 = []
+            for children in sequence:
+                ra = data_a.get(children, {}).get(type_name)
+                rb = data_b.get(children, {}).get(type_name)
+                if (ra is None or ra.skipped or ra.memory_bytes <= 0
+                        or rb is None or rb.skipped or rb.memory_bytes <= 0):
+                    rows2.append([f"{children:,}", "—", "—", "—", "—"])
+                    continue
+                savings = (1 - ra.memory_bytes / rb.memory_bytes) * 100
+                ratio = ra.memory_bytes / rb.memory_bytes
+                rows2.append([
+                    f"{children:,}",
+                    f"{ra.bytes_per_key:.1f}",
+                    f"{rb.bytes_per_key:.1f}",
+                    f"{savings:+.1f}%",
+                    f"{ratio:.2f}x",
+                ])
+            headers2 = ["Children", f"{label_a} B/key", f"{label_b} B/key", "Savings", "Ratio"]
+            print(f"\n    Savings trend  ({label_a} vs {label_b})")
+            if tabulate:
+                print(tabulate(rows2, headers=headers2, tablefmt="rounded_grid", stralign="right"))
+            else:
+                la_h = f"{label_a} B/key"
+                lb_h = f"{label_b} B/key"
+                print(f"    {'Children':>10}  {la_h:>16}  {lb_h:>16}  {'Savings':>8}  {'Ratio':>7}")
+                print("    " + "-" * 66)
+                for r in rows2:
+                    print(f"    {r[0]:>10}  {r[1]:>16}  {r[2]:>16}  {r[3]:>8}  {r[4]:>7}")
+
+
+def run_children_sweep(args) -> None:
+    """
+    Orchestrate a container-children sweep: run benchmark_instance for each
+    children count in the computed sequence, then print comparison tables.
+
+    Called from main() when --repeat is specified.  Suppresses per-type verbose
+    output during iteration; prints a one-line status per (server, iteration) pair.
+    """
+    max_children = args.container_children_count  # validated before call in main()
+    repeat1 = args.repeat[0]
+    repeat2 = args.repeat[1] if len(args.repeat) > 1 else None
+    sequence = compute_children_sequence(max_children, repeat1, repeat2)
+    actual_n = len(sequence)
+
+    # Build base configs without container_children_count applied so we can
+    # override num_fields per iteration ourselves.
+    saved_cc = args.container_children_count
+    args.container_children_count = None
+    base_configs = build_configs(args)
+    args.container_children_count = saved_cc
+
+    type_order = [t for t in DEFAULT_CONFIGS if base_configs[t].enabled]
+    if not type_order:
+        print("ERROR: No types enabled for sweep.")
+        sys.exit(1)
+
+    print(f"\n{'='*70}")
+    print(f" CONTAINER-CHILDREN SWEEP")
+    print(f" Children sequence: {' → '.join(str(c) for c in sequence)} ({actual_n} steps)")
+    print(f" Types: {', '.join(type_order)}")
+    print(f"{'='*70}\n")
+
+    servers = []
+    if not args.redis_only:
+        servers.append((
+            "Dragonfly",
+            args.dragonfly_host, args.dragonfly_port, args.dragonfly_password,
+            args.dragonfly_tls, args.dragonfly_tls_ca_cert,
+            args.dragonfly_tls_cert, args.dragonfly_tls_key,
+        ))
+    if not args.dragonfly_only:
+        servers.append((
+            args.redis_label,
+            args.redis_host, args.redis_port, args.redis_password,
+            args.redis_tls, args.redis_tls_ca_cert,
+            args.redis_tls_cert, args.redis_tls_key,
+        ))
+
+    # sweep_results[server_label][children_count][type_name] -> TypeResult
+    sweep_results: dict[str, dict[int, dict[str, TypeResult]]] = {
+        srv[0]: {} for srv in servers
+    }
+
+    total_iterations = len(servers) * actual_n
+    iteration = 0
+
+    for children in sequence:
+        iter_configs = copy.deepcopy(base_configs)
+        for tname in ("streams", "hashes", "lists", "sets", "sorted_sets"):
+            if tname in iter_configs:
+                iter_configs[tname].num_fields = children
+
+        for (label, host, port, password, tls, tls_ca, tls_cert, tls_key) in servers:
+            iteration += 1
+            print(f" [{iteration:>{len(str(total_iterations))}}/"
+                  f"{total_iterations}] {label}  children={children} ...",
+                  end="", flush=True)
+            t0 = time.time()
+
+            results = benchmark_instance(
+                host=host,
+                port=port,
+                password=password,
+                label=label,
+                configs=iter_configs,
+                type_order=type_order,
+                ttl=args.ttl,
+                tls=tls,
+                tls_ca_cert=tls_ca,
+                tls_cert=tls_cert,
+                tls_key=tls_key,
+                verbose=False,
+            )
+
+            elapsed = time.time() - t0
+            sweep_results[label][children] = results
+            active = [t for t in type_order
+                      if not results[t].skipped and results[t].memory_bytes > 0]
+            total_mem = sum(results[t].memory_bytes for t in active)
+            print(f"  {human_bytes(total_mem)}  ({elapsed:.0f}s)")
+
+    label_a = servers[0][0]
+    label_b = servers[1][0] if len(servers) == 2 else None
+    print_sweep_report(sweep_results, sequence, type_order, label_a, label_b)
+
+# =============================================================================
 # MAIN
 # =============================================================================
 
@@ -756,6 +1066,8 @@ Examples:
   %(prog)s --types strings hashes sorted_sets # Only test specific types
   %(prog)s --dragonfly-only # Skip Redis entirely
   %(prog)s --string-keys 10000000 --hash-keys 2000000 # Override specific counts
+  %(prog)s --dragonfly-only --container-children-count 200 --repeat 4  # Children sweep
+  %(prog)s --dragonfly-only --container-children-count 1000 --repeat 10 --repeat 10  # Dense upper-range sweep
         """,
     )
 
@@ -828,6 +1140,13 @@ Examples:
                     help="Members per sorted set")
     p.add_argument("--container-children-count", type=int, default=None,
                     help="Number of child/nested entries per key for streams, hashes, sets, and sorted sets")
+    p.add_argument("--repeat", type=int, action="append", metavar="N",
+                    help="Run a container-children sweep with N steps from 1 child up to "
+                         "--container-children-count. Requires --container-children-count. "
+                         "Specify --repeat a second time to add N fine-grained samples in "
+                         "the upper range (max/2, max), giving denser coverage near the "
+                         "maximum child count. If N exceeds --container-children-count it "
+                         "is reduced to that value.")
     p.add_argument("--pipeline-batch", type=int, default=None,
                     help="Commands per pipeline flush (default: 5000)")
     p.add_argument("--ttl", type=int, default=3600,
@@ -838,7 +1157,6 @@ Examples:
 
 def build_configs(args) -> dict[str, TypeConfig]:
     """Build type configs from defaults + CLI overrides."""
-    import copy
     configs = {k: copy.deepcopy(v) for k, v in DEFAULT_CONFIGS.items()}
 
     # Apply scale
@@ -918,6 +1236,16 @@ def build_configs(args) -> dict[str, TypeConfig]:
 
 def main():
     args = parse_args()
+
+    # Sweep mode — branch early, no interactive pause, no normal report
+    if args.repeat is not None:
+        if args.container_children_count is None:
+            print("ERROR: --repeat requires --container-children-count to be set.")
+            sys.exit(1)
+        run_children_sweep(args)
+        print("\nDone.")
+        return
+
     configs = build_configs(args)
 
     # Determine type execution order
@@ -1008,7 +1336,7 @@ def main():
 
     # Report
     if dragonfly_results and redis_results:
-        print_comparison(args.redis_label, redis_results, "Dragonfly", dragonfly_results, type_order)
+        print_comparison("Dragonfly", dragonfly_results, args.redis_label, redis_results, type_order)
     elif dragonfly_results:
         print_single_report("Dragonfly", dragonfly_results, type_order)
     elif redis_results:
