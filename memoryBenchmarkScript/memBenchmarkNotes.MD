@@ -162,7 +162,7 @@ python3 memory_benchmark.py --redis-label stack --redis-port 10000 --scale 0.1 -
  Benchmarking: stack (localhost:10000)
 ======================================================================
  Server version: 7.4.7
- 
+
 ==========================================================================================
  MEMORY COMPARISON: Dragonfly vs stack
 ==========================================================================================
@@ -197,4 +197,4 @@ Done.
 
 </details>
 
-Everything is configurable — key counts, value sizes, field counts, pipeline batch size, and you can --scale 5 for a large run or --scale 0.001 for a quick sanity check. Keys are written with TTL of 1 hour by default (example above uses 5 min). The output reports per-type memory delta, bytes/key, savings %, and ratio.
+Everything is configurable — key counts, value sizes, field counts, pipeline batch size, and you can --scale 5 for a large run or --scale 0.001 for a quick sanity check. Keys are written with TTL of 1 hour by default (example above specify several min). The output reports per-type memory delta, bytes/key, savings %, and ratio.
