@@ -35,16 +35,14 @@ go get github.com/redis/go-redis/v9@v9.7.3
 ```
 
 * Install DragonFlyDB
-```
-brew install dragonflydb
-```
+
 
 ## To run DragonflyDB in a container you can use docker or podman:
 * Install podman
 ```
 brew install podman
 ```
-* create a VM large enough to build cool stuff
+* create a VM large enough to build cool stuff (note the use of multiple cores (multi-threaded))
 ```
 podman machine init dragonfly --cpus 5 --memory 8192 --disk-size 20
 ```

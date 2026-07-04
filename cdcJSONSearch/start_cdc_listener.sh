@@ -1,12 +1,36 @@
 #!/bin/bash
 
-rm -f key.pem cert.pem
-yes | openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -nodes -subj '/CN=localhost' -extensions SAN \
-    -config <(cat /etc/ssl/openssl.cnf \
-            <(printf "[SAN]\nsubjectAltName='DNS:localhost'"))
+# Define infrastructure variables (with fallbacks)
+REMOTE_HOST=${1:-"your-remote-redis-domain.com"}
+REMOTE_PORT=${2:-"6379"}
+APP_PORT="3000"
 
-if [[ $# -ge 1 ]]; then
-    go run cdc_listener.go $1
-else
-    go run cdc_listener.go
+# Pull optional credentials from environment variables if present
+REDIS_USER="${REDIS_USER:-""}"
+REDIS_PASS="${REDIS_PASS:-""}"
+
+rm -f key.pem cert.pem
+
+yes | openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -nodes \
+    -subj '/CN=localhost' -extensions SAN \
+    -config <(cat /etc/ssl/openssl.cnf \
+    <(printf "[SAN]\nsubjectAltName='DNS:localhost'"))
+
+# Build arguments array dynamically based on whether credentials exist
+ARGS=(
+    --host "$REMOTE_HOST"
+    --redis-port "$REMOTE_PORT"
+    --port "$APP_PORT"
+    --use-tls
+)
+
+if [ -n "$REDIS_USER" ]; then
+    ARGS+=(--username "$REDIS_USER")
 fi
+
+if [ -n "$REDIS_PASS" ]; then
+    ARGS+=(--password "$REDIS_PASS")
+fi
+
+# Run the listener cleanly
+go run cdc_listener.go "${ARGS[@]}"

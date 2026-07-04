@@ -2,15 +2,20 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
-	"os"
-	"strconv"
+
 	"github.com/redis/go-redis/v9"
 )
+
+// Declare a global context background for Redis commands
+var ctx = context.Background()
 
 type PayloadItem struct {
 	After struct {
@@ -42,28 +47,48 @@ const (
 )
 
 func main() {
-	port := 3000
-	if len(os.Args) >= 2 {
-		var err error
-		port, err = strconv.Atoi(os.Args[1])
-		if err != nil {
-			panic(err)
+	// 1. Define command-line flags
+	appPort := flag.Int("port", 3000, "Port for this application to run on")
+	redisHost := flag.String("host", "localhost", "Redis/DragonflyDB server hostname")
+	redisPort := flag.Int("redis-port", 6379, "Redis/DragonflyDB server port")
+	useTLS := flag.Bool("use-tls", false, "Enable TLS connection to Redis/DragonflyDB")
+	skipVerify := flag.Bool("skip-verify", true, "Skip TLS verification for Redis (set false for production public CAs)")
+	username := flag.String("username", "default", "Username for Redis authentication (optional)")
+	password := flag.String("password", "", "Password for Redis authentication (optional)")
+	// 2. Parse the flags
+	flag.Parse()
+
+	log.Printf("Starting application on port: %d", *appPort)
+
+	// 3. Configure Redis Options
+	opts := &redis.Options{
+		Addr: net.JoinHostPort(*redisHost, fmt.Sprintf("%d", *redisPort)),
+	}
+	if *username != "" {
+		opts.Username = *username
+	}
+	if *password != "" {
+		opts.Password = *password
+	}
+	// 4. Conditionally add TLS configuration
+	if *useTLS {
+		opts.TLSConfig = &tls.Config{
+			MinVersion:         tls.VersionTLS12,
+			InsecureSkipVerify: *skipVerify, // Added control toggle for self-signed remote instances
 		}
+		log.Printf("Enabling TLS for Redis connection to %s", opts.Addr)
 	}
 
-	rdb := redis.NewClient(&redis.Options{
-		Addr: "localhost:6379",
-	})
-        log.Printf("Connected to DragonflyDB using: %v",rdb)
-        ctx := context.Background()
-        rdb.Set(ctx,"otkey","so much for testing",0)
+	// 5. Connect and execute
+	rdb := redis.NewClient(opts)
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		b, err := io.ReadAll(r.Body)
 		if err != nil {
-			panic(err)
+			log.Printf("error reading body: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
 		}
-                log.Printf("%s", b)
 
 		var data RequestBody
 		if err := json.Unmarshal(b, &data); err != nil {
@@ -73,7 +98,6 @@ func main() {
 		}
 
 		written := 0
-                log.Printf("\n\ndata.Payload = %v",data.Payload)
 		for _, item := range data.Payload {
 			itemJSON, err := json.Marshal(item)
 			if err != nil {
@@ -82,17 +106,20 @@ func main() {
 			}
 
 			key := fmt.Sprintf("vehicle:%s", item.After.ID)
-			if err := rdb.JSONSet(ctx, key,"$", itemJSON).Err(); err != nil {
-				log.Printf("error writing key %s to DragonflyDB: %v", key, err)
+
+			// Context (ctx) now properly referenced globally
+			if err := rdb.JSONSet(ctx, key, "$", itemJSON).Err(); err != nil {
+				log.Printf("error writing key %s to database: %v", key, err)
 				continue
 			}
 			written++
 		}
 
-		log.Printf("wrote %d/%d items to DragonflyDB", written, len(data.Payload))
+		log.Printf("Processed and wrote %d/%d items safely.", written, len(data.Payload))
 		w.WriteHeader(http.StatusOK)
 	})
 
-	log.Printf("starting server on port %d", port)
-	log.Fatal(http.ListenAndServeTLS(fmt.Sprintf(":%d", port), CertPath, KeyPath, nil))
+	// Fixed variables: dereferenced flag pointer (*appPort)
+	log.Printf("Starting HTTPS listener server on port %d...", *appPort)
+	log.Fatal(http.ListenAndServeTLS(fmt.Sprintf(":%d", *appPort), CertPath, KeyPath, nil))
 }
