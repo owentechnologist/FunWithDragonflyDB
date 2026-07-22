@@ -3,7 +3,8 @@
 # Define infrastructure variables (with fallbacks)
 REMOTE_HOST=${1:-"your-remote-redis-domain.com"}
 REMOTE_PORT=${2:-"6379"}
-APP_PORT="3000"
+USE_TLS=${3:-false}
+APP_PORT=${4:-"3000"}
 
 # Pull optional credentials from environment variables if present
 REDIS_USER="${REDIS_USER:-""}"
@@ -21,7 +22,7 @@ ARGS=(
     --host "$REMOTE_HOST"
     --redis-port "$REMOTE_PORT"
     --port "$APP_PORT"
-    --use-tls
+    --use-tls="$USE_TLS"
 )
 
 if [ -n "$REDIS_USER" ]; then

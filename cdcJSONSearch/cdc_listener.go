@@ -70,15 +70,20 @@ func main() {
 	if *password != "" {
 		opts.Password = *password
 	}
-	// 4. Conditionally add TLS configuration
+	// Safely check bool values
 	if *useTLS {
+		host, _, err := net.SplitHostPort(opts.Addr)
+		if err != nil {
+			host = opts.Addr // Fallback if opts.Addr is just a hostname without a port
+		}
+
 		opts.TLSConfig = &tls.Config{
 			MinVersion:         tls.VersionTLS12,
-			InsecureSkipVerify: *skipVerify, // Added control toggle for self-signed remote instances
+			ServerName:         host,
+			InsecureSkipVerify: *skipVerify,
 		}
 		log.Printf("Enabling TLS for Redis connection to %s", opts.Addr)
 	}
-
 	// 5. Connect and execute
 	rdb := redis.NewClient(opts)
 

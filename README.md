@@ -135,10 +135,13 @@ in this project's cdcJSONSearch directory:
 chmod 755 start_cdc_listener.go
 ```
 
-* start the cdc listener:
+* start the cdc listener: args are: 
+1. host for dragonfly/redis 
+2. port for dragonfly/redis
+3. boolean true or false for turning on tls connection to dfly/redis
 
 ```
-./start_cdc_listener.sh
+./start_cdc_listener.sh localhost 6379 false
 ```
 
 <details><summary>Expected Output:</summary>
