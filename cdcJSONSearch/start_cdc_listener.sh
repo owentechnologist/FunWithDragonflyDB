@@ -34,4 +34,6 @@ if [ -n "$REDIS_PASS" ]; then
 fi
 
 # Run the listener cleanly
-go run cdc_listener.go "${ARGS[@]}"
+#go run cdc_listener.go "${ARGS[@]}"
+#go run cdc_multi_listener.go "${ARGS[@]}"
+go run cdc_topic_guided_listener.go "${ARGS[@]}"
