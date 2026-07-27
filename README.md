@@ -66,7 +66,7 @@ redis-cli
 ```
 * in the redis-cli shell: create a Search index to be used once we populate DragonFlyDB with JSON objects
 ```
-FT.CREATE idx_vehicles ON JSON PREFIX 1 vehicle: SCHEMA $.after.city AS CURRENT_CITY TEXT $.after.current_location AS STREET_ADDRESS TEXT $.after.status AS CURRENT_STATUS TAG $.after.type AS VEHICLE_TYPE TAG $.after.ext.color AS COLOR TAG $.after.ext.brand AS BRAND TAG
+FT.CREATE idx_takearide_vehicles ON JSON PREFIX 1 takearide:vehicle: SCHEMA $.after.city AS CURRENT_CITY TEXT $.after.current_location AS STREET_ADDRESS TEXT $.after.status AS CURRENT_STATUS TAG $.after.type AS VEHICLE_TYPE TAG $.after.ext.color AS COLOR TAG $.after.ext.brand AS BRAND TAG
 ```
 
 * from the redis-cli interactive shell do:
@@ -200,7 +200,7 @@ dbsize
 * Using the redis-cli Query for all vehicles by color:
 
 ```
-FT.AGGREGATE idx_vehicles "*" GROUPBY 1 @COLOR REDUCE COUNT 0 AS color_count APPLY "format('%s %s vehicles', @color_count, @COLOR)" AS color_string GROUPBY 1 @color_string SORTBY 2 @color_string ASC
+FT.AGGREGATE idx_takearide_vehicles "*" GROUPBY 1 @COLOR REDUCE COUNT 0 AS color_count APPLY "format('%s %s vehicles', @color_count, @COLOR)" AS color_string GROUPBY 1 @color_string SORTBY 2 @color_string ASC
 ```
 <details><summary>Expected Output:</summary>
 <p>
@@ -254,7 +254,7 @@ demo@127.0.0.1:26257/movr> UPDATE VEHICLES SET ext=jsonb_set(ext, '{color}', '"b
 
 
 ```
-FT.AGGREGATE idx_vehicles "*" GROUPBY 1 @COLOR REDUCE COUNT 0 AS color_count APPLY "format('%s %s vehicles', @color_count, @COLOR)" AS color_string GROUPBY 1 @color_string SORTBY 2 @color_string ASC
+FT.AGGREGATE idx_takearide_vehicles "*" GROUPBY 1 @COLOR REDUCE COUNT 0 AS color_count APPLY "format('%s %s vehicles', @color_count, @COLOR)" AS color_string GROUPBY 1 @color_string SORTBY 2 @color_string ASC
 ```
 <details><summary>Expected Output:</summary>
 <p>
@@ -284,7 +284,7 @@ FT.AGGREGATE idx_vehicles "*" GROUPBY 1 @COLOR REDUCE COUNT 0 AS color_count APP
 <p>
 
 ```bash
- ./command_timer.sh 6379 FT.AGGREGATE idx_vehicles "*" GROUPBY 1 @COLOR REDUCE COUNT 0 AS color_count APPLY "format('%s %s vehicles', @color_count, @COLOR)" AS color_string GROUPBY 1 @color_string SORTBY 2 @color_string ASC
+ ./command_timer.sh 6379 FT.AGGREGATE idx_takearide_vehicles "*" GROUPBY 1 @COLOR REDUCE COUNT 0 AS color_count APPLY "format('%s %s vehicles', @color_count, @COLOR)" AS color_string GROUPBY 1 @color_string SORTBY 2 @color_string ASC
 1) (integer) 5
 2) 1) "color_string"
    2) "3243 green vehicles"
