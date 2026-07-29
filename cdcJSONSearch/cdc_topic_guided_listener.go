@@ -337,7 +337,10 @@ func main() {
 				log.Printf("error re-marshaling 'after' document (prefix %s, id %s): %v", prefix, id, err)
 				continue
 			}
-			key := fmt.Sprintf("%s:%s", prefix, id)
+			//had an issue with "san francisco" in the keynames
+			sanitizedID := strings.ReplaceAll(id, " ", "_")
+			key := fmt.Sprintf("%s:%s", prefix, sanitizedID)
+
 			toWrite = append(toWrite, pendingWrite{key: key, itemJSON: afterJSON})
 		}
 
