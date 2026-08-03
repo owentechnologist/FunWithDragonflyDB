@@ -66,7 +66,15 @@ redis-cli
 ```
 * in the redis-cli shell: create a Search index to be used once we populate DragonFlyDB with JSON objects
 ```
-FT.CREATE idx_takearide_vehicles ON JSON PREFIX 1 takearide:vehicle: SCHEMA $.after.city AS CURRENT_CITY TEXT $.after.current_location AS STREET_ADDRESS TEXT $.after.status AS CURRENT_STATUS TAG $.after.type AS VEHICLE_TYPE TAG $.after.ext.color AS COLOR TAG $.after.ext.brand AS BRAND TAG
+FT.CREATE idx_takearide_vehicles ON JSON PREFIX 1 takearide:vehicle: SCHEMA
+  $.id AS VEHICLE_ID TEXT
+  $.city AS CURRENT_CITY TAG
+  $.current_location AS STREET_ADDRESS TEXT
+  $.status AS CURRENT_STATUS TAG
+  $.type AS VEHICLE_TYPE TAG
+  $.ext.color AS COLOR TAG
+  $.ext.brand AS BRAND TAG
+  $.creation_time AS CREATION_TIME NUMERIC SORTABLE
 ```
 
 * from the redis-cli interactive shell do:
