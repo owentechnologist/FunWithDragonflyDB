@@ -164,15 +164,34 @@ func assertSameKeyLayout(t *testing.T, ctx context.Context, conn *redis.Client) 
 	}
 }
 
+// A namespace spans two key shapes: the apex tier hashes the namespace itself
+// (r:{ns:<tag>}:...) while the bucketed tiers hash only the slot token and
+// carry the namespace as a plain prefix (r:<ns>:{<token>}:...). Neither scan
+// pattern finds the other's keys, so both are needed.
+func namespaceScanPatterns(ns string) []string {
+	return []string{"r:{" + ns + ":*", "r:" + ns + ":*"}
+}
+
+func rawNamespaceKeys(t *testing.T, ctx context.Context, conn *redis.Client, ns string) []string {
+	t.Helper()
+	var all []string
+	for _, pattern := range namespaceScanPatterns(ns) {
+		keys, err := conn.Keys(ctx, pattern).Result()
+		if err != nil {
+			t.Fatalf("KEYS %s: %v", pattern, err)
+		}
+		all = append(all, keys...)
+	}
+	return all
+}
+
 func namespaceKeys(t *testing.T, ctx context.Context, conn *redis.Client, ns string) []string {
 	t.Helper()
-	keys, err := conn.Keys(ctx, "r:{"+ns+":*").Result()
-	if err != nil {
-		t.Fatalf("KEYS for %s: %v", ns, err)
-	}
+	keys := rawNamespaceKeys(t, ctx, conn, ns)
 	normalized := make([]string, len(keys))
 	for i, k := range keys {
-		normalized[i] = strings.Replace(k, "r:{"+ns+":", "r:{NS:", 1)
+		k = strings.Replace(k, "r:{"+ns+":", "r:{NS:", 1)
+		normalized[i] = strings.Replace(k, "r:"+ns+":", "r:NS:", 1)
 	}
 	sort.Strings(normalized)
 	return normalized
@@ -180,10 +199,7 @@ func namespaceKeys(t *testing.T, ctx context.Context, conn *redis.Client, ns str
 
 func clearNamespace(t *testing.T, ctx context.Context, conn *redis.Client, ns string) {
 	t.Helper()
-	keys, err := conn.Keys(ctx, "r:{"+ns+":*").Result()
-	if err != nil {
-		t.Fatalf("KEYS for %s: %v", ns, err)
-	}
+	keys := rawNamespaceKeys(t, ctx, conn, ns)
 	if len(keys) > 0 {
 		if err := conn.Del(ctx, keys...).Err(); err != nil {
 			t.Fatalf("DEL for %s: %v", ns, err)

@@ -605,20 +605,20 @@ func printSampleReport(samples []SampleResult) {
 
 // describeQueryOps reconstructs, for reporting only, the Redis-level
 // operation and key names a Lookup(fqdn1, port, fqdn2, mode) call issues --
-// purely by re-running the same candidates() logic Lookup itself uses, so it
-// costs nothing during the timed phase and only runs for the handful of rows
-// the top-slow report prints. namespace mirrors the "bench" constant Put/
-// NewRuleStore write under; target selects EVALSHA-grouped-by-tag (direct,
-// router.go's Lua path) vs one HMGET per candidate (grpc=..., routerd's
-// no-Lua path).
-func describeQueryOps(fqdn1 string, port int, mode MatchMode, numBuckets int, namespace, target string) (op string, keys []string) {
+// purely by re-running the same candidates() logic Lookup itself uses and
+// naming the keys through the store's own key(), so it cannot drift from the
+// real key format. It costs nothing during the timed phase and only runs for
+// the handful of rows the top-slow report prints. target selects
+// EVALSHA-grouped-by-tag (direct, router.go's Lua path) vs one HMGET per
+// candidate (grpc=..., routerd's no-Lua path).
+func describeQueryOps(store *RuleStore, fqdn1 string, port int, mode MatchMode, target string) (op string, keys []string) {
 	normalized, err := normalizeFqdn(fqdn1)
 	if err != nil {
 		return "invalid fqdn1", nil
 	}
-	cands := candidates(normalized, mode, numBuckets)
+	cands := candidates(normalized, mode, store.numBuckets)
 	for _, c := range cands {
-		keys = append(keys, fmt.Sprintf("r:{%s:%s}:%s:%d", namespace, c.Tag, c.Pattern, port))
+		keys = append(keys, store.key(c.Tag, c.BucketIndex, c.Pattern, port))
 	}
 	if strings.HasPrefix(target, "grpc=") {
 		return fmt.Sprintf("HMGET x%d", len(cands)), keys
@@ -634,7 +634,7 @@ func describeQueryOps(fqdn1 string, port int, mode MatchMode, numBuckets int, na
 	return fmt.Sprintf("EVALSHA x%d", numGroups), keys
 }
 
-func printTopSlowReport(entries []TopSlowResult, mode MatchMode, numBuckets int, target string, slowLatencyGate float64) {
+func printTopSlowReport(entries []TopSlowResult, store *RuleStore, mode MatchMode, target string, slowLatencyGate float64) {
 	fmt.Println()
 	fmt.Printf("=== Top %d slowest queries (>= %.3fms) ===\n", topSlowLimit, slowLatencyGate)
 	if len(entries) == 0 {
@@ -642,7 +642,7 @@ func printTopSlowReport(entries []TopSlowResult, mode MatchMode, numBuckets int,
 		return
 	}
 	for i, e := range entries {
-		op, keys := describeQueryOps(e.Fqdn1, e.Port, mode, numBuckets, "bench", target)
+		op, keys := describeQueryOps(store, e.Fqdn1, e.Port, mode, target)
 		fmt.Printf("%2d. %s  %9.3fms  %-10s fqdn1=%s port=%d fqdn2=%s result=%s\n",
 			i+1, e.Timestamp.Format("2006-01-02T15:04:05.000Z07:00"), e.LatencyMs, op,
 			e.Fqdn1, e.Port, e.Fqdn2, e.Result)
@@ -822,7 +822,7 @@ func main() {
 	latencies, samples, topSlow, queryElapsed, numErrors := runQueryPhase(queryStore, queries, mode, cfg.queryConcurrency, cfg.slowLatencyGate)
 	printLatencyReport(computeLatencyStats(latencies), len(queries), queryElapsed, cfg.queryConcurrency, numErrors)
 	printSampleReport(samples)
-	printTopSlowReport(topSlow, mode, cfg.numBuckets, cfg.target, cfg.slowLatencyGate)
+	printTopSlowReport(topSlow, store, mode, cfg.target, cfg.slowLatencyGate)
 	if psl, ok := queryStore.(PoolStatsLookuper); ok {
 		printPoolStatsSummary(psl.PoolStats())
 	}
