@@ -2,6 +2,7 @@ package router
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/redis/go-redis/v9"
@@ -55,6 +56,37 @@ func mustLookup(t *testing.T, store *NoScriptRuleStore, fqdn1 string, port int, 
 		t.Fatalf("Lookup(%q, %d, %q, %s): %v", fqdn1, port, fqdn2, mode, err)
 	}
 	return m
+}
+
+// TestBucketedPutWritesTheGlobalRuleIntoReplicaKeys proves the bucketed key
+// name store.go's key() builds is exactly what the doc comment and the
+// Python reference (RuleStore._key) claim, not merely internally consistent
+// with itself: with numBuckets=4, Put-ing a "*" rule must write one hash per
+// bucket, each key equal to r:<ns>:{<token i>}:__global__:<i>:*:<port> built
+// straight from ComputeBucketTable(4).
+func TestBucketedPutWritesTheGlobalRuleIntoReplicaKeys(t *testing.T) {
+	ctx, conn := newTestConn(t)
+	const numBuckets = 4
+	store, err := NewNoScriptRuleStore(ctx, conn, "test", numBuckets)
+	if err != nil {
+		t.Fatalf("NewNoScriptRuleStore: %v", err)
+	}
+	mustPut(t, store, Rule{Fqdn1: "*", Port: 443, Fqdn2: "*", RuleID: "r-global", Scope: ScopeBoth})
+
+	table, err := ComputeBucketTable(numBuckets)
+	if err != nil {
+		t.Fatalf("ComputeBucketTable(%d): %v", numBuckets, err)
+	}
+	for i := 0; i < numBuckets; i++ {
+		want := fmt.Sprintf("r:test:{%s}:__global__:%d:*:443", table.Token(i), i)
+		exists, err := conn.Exists(ctx, want).Result()
+		if err != nil {
+			t.Fatalf("EXISTS %q: %v", want, err)
+		}
+		if exists == 0 {
+			t.Errorf("bucket %d: key %q does not exist", i, want)
+		}
+	}
 }
 
 func TestExactMatchIsNeverScopeFiltered(t *testing.T) {

@@ -170,15 +170,32 @@ func assertSameKeyLayout(t *testing.T, ctx context.Context, conn *redis.Client) 
 	}
 }
 
+// namespaceKeysForPattern KEYS-scans conn for one glob pattern, failing the
+// test on error.
+func namespaceKeysForPattern(t *testing.T, ctx context.Context, conn *redis.Client, pattern string) []string {
+	t.Helper()
+	keys, err := conn.Keys(ctx, pattern).Result()
+	if err != nil {
+		t.Fatalf("KEYS for %s: %v", pattern, err)
+	}
+	return keys
+}
+
+// namespaceKeys returns every key belonging to namespace ns, apex/meta-tier
+// (r:{ns:...) and bucketed-tier (r:ns:{...) alike, with the namespace
+// segment of each form rewritten to a fixed "NS" so two namespaces' key sets
+// compare equal. The bucketed-tier token is namespace-independent, so no
+// further rewriting is needed there.
 func namespaceKeys(t *testing.T, ctx context.Context, conn *redis.Client, ns string) []string {
 	t.Helper()
-	keys, err := conn.Keys(ctx, "r:{"+ns+":*").Result()
-	if err != nil {
-		t.Fatalf("KEYS for %s: %v", ns, err)
+	apexKeys := namespaceKeysForPattern(t, ctx, conn, "r:{"+ns+":*")
+	bucketedKeys := namespaceKeysForPattern(t, ctx, conn, "r:"+ns+":*")
+	normalized := make([]string, 0, len(apexKeys)+len(bucketedKeys))
+	for _, k := range apexKeys {
+		normalized = append(normalized, strings.Replace(k, "r:{"+ns+":", "r:{NS:", 1))
 	}
-	normalized := make([]string, len(keys))
-	for i, k := range keys {
-		normalized[i] = strings.Replace(k, "r:{"+ns+":", "r:{NS:", 1)
+	for _, k := range bucketedKeys {
+		normalized = append(normalized, strings.Replace(k, "r:"+ns+":{", "r:NS:{", 1))
 	}
 	sort.Strings(normalized)
 	return normalized
@@ -186,10 +203,10 @@ func namespaceKeys(t *testing.T, ctx context.Context, conn *redis.Client, ns str
 
 func clearNamespace(t *testing.T, ctx context.Context, conn *redis.Client, ns string) {
 	t.Helper()
-	keys, err := conn.Keys(ctx, "r:{"+ns+":*").Result()
-	if err != nil {
-		t.Fatalf("KEYS for %s: %v", ns, err)
-	}
+	keys := append(
+		namespaceKeysForPattern(t, ctx, conn, "r:{"+ns+":*"),
+		namespaceKeysForPattern(t, ctx, conn, "r:"+ns+":*")...,
+	)
 	if len(keys) > 0 {
 		if err := conn.Del(ctx, keys...).Err(); err != nil {
 			t.Fatalf("DEL for %s: %v", ns, err)

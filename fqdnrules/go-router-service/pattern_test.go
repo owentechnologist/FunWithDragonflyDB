@@ -152,30 +152,52 @@ func TestGlobalTierBucketIndexVariesWithQueryFqdn(t *testing.T) {
 		}
 		return tags
 	}
-
-	want8 := []string{"__global__:0", "__global__:1", "__global__:2", "__global__:3", "__global__:4"}
-	if got := tagsFor(8); !equalStrings(got, want8) {
-		t.Errorf("numBuckets=8 tags = %v, want %v", got, want8)
+	indicesFor := func(numBuckets int) []int {
+		var indices []int
+		for _, f := range bucketProbeFqdns {
+			cs := candidates(f, MultiLevel, numBuckets)
+			indices = append(indices, cs[len(cs)-1].BucketIndex)
+		}
+		return indices
 	}
 
-	want4 := []string{"__global__:0", "__global__:1", "__global__:2", "__global__:3", "__global__:0"}
-	if got := tagsFor(4); !equalStrings(got, want4) {
-		t.Errorf("numBuckets=4 tags = %v, want %v", got, want4)
+	// The tag stays the unsuffixed base tag at every numBuckets -- only
+	// BucketIndex varies with the query fqdn.
+	wantTags := []string{"__global__", "__global__", "__global__", "__global__", "__global__"}
+	for _, numBuckets := range []int{1, 4, 8} {
+		if got := tagsFor(numBuckets); !equalStrings(got, wantTags) {
+			t.Errorf("numBuckets=%d tags = %v, want %v", numBuckets, got, wantTags)
+		}
 	}
 
-	want1 := []string{"__global__", "__global__", "__global__", "__global__", "__global__"}
-	if got := tagsFor(1); !equalStrings(got, want1) {
-		t.Errorf("numBuckets=1 tags = %v, want %v", got, want1)
+	want8 := []int{0, 1, 2, 3, 4}
+	if got := indicesFor(8); !equalInts(got, want8) {
+		t.Errorf("numBuckets=8 bucket indices = %v, want %v", got, want8)
+	}
+
+	want4 := []int{0, 1, 2, 3, 0}
+	if got := indicesFor(4); !equalInts(got, want4) {
+		t.Errorf("numBuckets=4 bucket indices = %v, want %v", got, want4)
+	}
+
+	want1 := []int{0, 0, 0, 0, 0}
+	if got := indicesFor(1); !equalInts(got, want1) {
+		t.Errorf("numBuckets=1 bucket indices = %v, want %v", got, want1)
 	}
 }
 
 func TestBucketedTldTierButUnbucketedApexTier(t *testing.T) {
+	// BucketIndex 0 is the literal crc32("shop.omega.com") % 8, not a value
+	// recomputed here with the same call candidates() makes -- recomputing it
+	// would leave the assertion true even if candidates() hashed the wrong
+	// input. Every candidate carries the index, apex tier included; only the
+	// store decides which tags actually use it.
 	cs := candidates("shop.omega.com", MultiLevel, 8)
 	want := []Candidate{
-		{Pattern: "shop.omega.com", Rank: 0, NeedsMulti: false, Tag: "omega.com"},
-		{Pattern: "*.omega.com", Rank: 1, NeedsMulti: false, Tag: "omega.com"},
-		{Pattern: "*.com", Rank: 2, NeedsMulti: true, Tag: "__tld__:com:0"},
-		{Pattern: "*", Rank: 255, NeedsMulti: false, Tag: "__global__:0"},
+		{Pattern: "shop.omega.com", Rank: 0, NeedsMulti: false, Tag: "omega.com", BucketIndex: 0},
+		{Pattern: "*.omega.com", Rank: 1, NeedsMulti: false, Tag: "omega.com", BucketIndex: 0},
+		{Pattern: "*.com", Rank: 2, NeedsMulti: true, Tag: "__tld__:com", BucketIndex: 0},
+		{Pattern: "*", Rank: 255, NeedsMulti: false, Tag: "__global__", BucketIndex: 0},
 	}
 	assertCandidates(t, cs, want)
 }
@@ -211,18 +233,6 @@ func TestIsBucketedTag(t *testing.T) {
 		if got := isBucketedTag(c.tag); got != c.want {
 			t.Errorf("isBucketedTag(%q) = %v, want %v", c.tag, got, c.want)
 		}
-	}
-}
-
-func TestBucketedTagLeavesBaseTagAloneWhenBucketingIsOff(t *testing.T) {
-	if got := bucketedTag("__global__", 1, 0); got != "__global__" {
-		t.Errorf("bucketedTag with numBuckets=1 = %q, want %q", got, "__global__")
-	}
-	if got := bucketedTag("__global__", 0, 0); got != "__global__" {
-		t.Errorf("bucketedTag with numBuckets=0 = %q, want %q", got, "__global__")
-	}
-	if got := bucketedTag("__tld__:com", 4, 3); got != "__tld__:com:3" {
-		t.Errorf("bucketedTag(__tld__:com, 4, 3) = %q, want %q", got, "__tld__:com:3")
 	}
 }
 
@@ -287,6 +297,18 @@ func TestStorageByteDefaultsToBoth(t *testing.T) {
 }
 
 func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func equalInts(a, b []int) bool {
 	if len(a) != len(b) {
 		return false
 	}

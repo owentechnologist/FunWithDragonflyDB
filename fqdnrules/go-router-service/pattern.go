@@ -66,11 +66,19 @@ func (s WildcardScope) storageByte() byte {
 // One pattern string a concrete fqdn could be matched by, with its precedence
 // rank and the hash-tag group its Redis key belongs to. Within a list returned
 // by candidates(), rank strictly increases and index order is precedence order.
+//
+// Tag is always the unsuffixed base tag (hashTag(pattern)); it never carries
+// bucket placement. BucketIndex is which replica of a bucketed tier
+// (__global__/__tld__:<x>) this query's candidates fall into -- 0 when the
+// tag isn't bucketed, or when the store isn't bucketing at all. The store
+// layer (store.go) is the one place that resolves (Tag, BucketIndex) to a
+// physical key; this file never does.
 type Candidate struct {
-	Pattern    string
-	Rank       int
-	NeedsMulti bool // only reachable under MultiLevel
-	Tag        string
+	Pattern     string
+	Rank        int
+	NeedsMulti  bool // only reachable under MultiLevel
+	Tag         string
+	BucketIndex int
 }
 
 func normalizeFqdn(fqdn string) (string, error) {
@@ -123,19 +131,8 @@ func isBucketedTag(tag string) bool {
 	return tag == "__global__" || strings.HasPrefix(tag, "__tld__:")
 }
 
-func bucketedTag(baseTag string, numBuckets, bucketIndex int) string {
-	if numBuckets <= 1 {
-		return baseTag
-	}
-	return fmt.Sprintf("%s:%d", baseTag, bucketIndex)
-}
-
-func newCandidate(pattern string, rank int, needsMulti bool, bucketIndex, numBuckets int) Candidate {
-	tag := hashTag(pattern)
-	if isBucketedTag(tag) {
-		tag = bucketedTag(tag, numBuckets, bucketIndex)
-	}
-	return Candidate{Pattern: pattern, Rank: rank, NeedsMulti: needsMulti, Tag: tag}
+func newCandidate(pattern string, rank int, needsMulti bool, bucketIndex int) Candidate {
+	return Candidate{Pattern: pattern, Rank: rank, NeedsMulti: needsMulti, Tag: hashTag(pattern), BucketIndex: bucketIndex}
 }
 
 // Every pattern that could match fqdn under mode, most specific first. fqdn
@@ -151,18 +148,18 @@ func candidates(fqdn string, mode MatchMode, numBuckets int) []Candidate {
 		// the converted value is never negative and the modulo is non-negative.
 		bucketIndex = int(crc32.ChecksumIEEE([]byte(fqdn))) % numBuckets
 	}
-	result := []Candidate{newCandidate(fqdn, 0, false, bucketIndex, numBuckets)}
+	result := []Candidate{newCandidate(fqdn, 0, false, bucketIndex)}
 	if n >= 2 {
 		parent := strings.Join(labels[1:], ".")
-		result = append(result, newCandidate("*."+parent, 1, false, bucketIndex, numBuckets))
+		result = append(result, newCandidate("*."+parent, 1, false, bucketIndex))
 	}
 	if mode == MultiLevel {
 		for k := 2; k < n; k++ {
 			remaining := strings.Join(labels[k:], ".")
-			result = append(result, newCandidate("*."+remaining, k, true, bucketIndex, numBuckets))
+			result = append(result, newCandidate("*."+remaining, k, true, bucketIndex))
 		}
 	}
-	result = append(result, newCandidate("*", globalRank, false, bucketIndex, numBuckets))
+	result = append(result, newCandidate("*", globalRank, false, bucketIndex))
 	return result
 }
 

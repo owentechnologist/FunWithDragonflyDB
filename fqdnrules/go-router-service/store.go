@@ -6,9 +6,19 @@
 // fqdn1 candidate key, all pipelined into a single round trip, and does the
 // scope-filtering and specificity ranking in Go instead of inside Dragonfly.
 //
+// The apex tier (one key per registrable domain) is never bucketed:
+//
 //	r:{ns:<apex>}:<fqdn1_pattern>:<port>
-//	r:{ns:__tld__:<tld>}:<fqdn1_pattern>:<port>
-//	r:{ns:__global__}:<fqdn1_pattern>:<port>
+//
+// The __tld__ and __global__ tiers are a single logical key each for every
+// query; with numBuckets > 1 they replicate across that many physical keys,
+// each hash-tagged on a deterministic, CRC16-slot-targeted token from
+// ComputeBucketTable(numBuckets) rather than on namespace/tag text:
+//
+//	r:<ns>:{<token>}:<tag>:<bucket_index>:<fqdn1_pattern>:<port>
+//
+// numBuckets=1 keeps the __tld__/__global__ tiers on the apex-style
+// unbucketed key form, byte for byte.
 package router
 
 import (
@@ -45,6 +55,7 @@ type NoScriptRuleStore struct {
 	conn       *redis.Client
 	namespace  string
 	numBuckets int
+	buckets    *BucketTable
 }
 
 func validatePort(port int) error {
@@ -58,7 +69,13 @@ func NewNoScriptRuleStore(ctx context.Context, conn *redis.Client, namespace str
 	if numBuckets < 1 {
 		numBuckets = 1
 	}
-	s := &NoScriptRuleStore{ctx: ctx, conn: conn, namespace: namespace, numBuckets: numBuckets}
+	// Resolved unconditionally, including numBuckets=1, so key() needs no nil
+	// guard.
+	buckets, err := ComputeBucketTable(numBuckets)
+	if err != nil {
+		return nil, fmt.Errorf("computing bucket table for numBuckets=%d: %w", numBuckets, err)
+	}
+	s := &NoScriptRuleStore{ctx: ctx, conn: conn, namespace: namespace, numBuckets: numBuckets, buckets: buckets}
 
 	// Checked unconditionally, including numBuckets=1: a reader left at the
 	// default against a namespace some other writer already bucketed would
@@ -86,7 +103,18 @@ func NewNoScriptRuleStore(ctx context.Context, conn *redis.Client, namespace str
 	return s, nil
 }
 
-func (s *NoScriptRuleStore) key(tag, fqdn1Pattern string, port int) string {
+// key is the physical key text for one candidate. A bucketed tier (tag is
+// __global__/__tld__:<x> and this store actually replicates, i.e.
+// numBuckets > 1) hashes only the deterministic slot-targeted token for
+// bucketIndex -- namespace/tag/bucketIndex/pattern/port all stay outside the
+// braces as plain key-body text. Anything else (the apex tier, or a
+// bucketable tag when numBuckets <= 1) keeps the original unbucketed form,
+// byte for byte.
+func (s *NoScriptRuleStore) key(tag string, bucketIndex int, fqdn1Pattern string, port int) string {
+	if isBucketedTag(tag) && s.numBuckets > 1 {
+		token := s.buckets.Token(bucketIndex)
+		return fmt.Sprintf("r:%s:{%s}:%s:%d:%s:%d", s.namespace, token, tag, bucketIndex, fqdn1Pattern, port)
+	}
 	return fmt.Sprintf("r:{%s:%s}:%s:%d", s.namespace, tag, fqdn1Pattern, port)
 }
 
@@ -103,11 +131,11 @@ func (s *NoScriptRuleStore) keysForPattern(pattern string, port int) []string {
 	if isBucketedTag(baseTag) && s.numBuckets > 1 {
 		keys := make([]string, s.numBuckets)
 		for i := range keys {
-			keys[i] = s.key(bucketedTag(baseTag, s.numBuckets, i), pattern, port)
+			keys[i] = s.key(baseTag, i, pattern, port)
 		}
 		return keys
 	}
-	return []string{s.key(baseTag, pattern, port)}
+	return []string{s.key(baseTag, 0, pattern, port)}
 }
 
 func (s *NoScriptRuleStore) Put(rule Rule) error {
@@ -227,7 +255,7 @@ func (s *NoScriptRuleStore) Lookup(fqdn1 string, port int, fqdn2 string, mode Ma
 	pipe := s.conn.Pipeline()
 	cmds := make([]*redis.SliceCmd, len(aCandidates))
 	for i, a := range aCandidates {
-		key := s.key(a.Tag, a.Pattern, port)
+		key := s.key(a.Tag, a.BucketIndex, a.Pattern, port)
 		cmds[i] = pipe.HMGet(s.ctx, key, fields...)
 	}
 	if _, err := pipe.Exec(s.ctx); err != nil && !errors.Is(err, redis.Nil) {
@@ -237,7 +265,7 @@ func (s *NoScriptRuleStore) Lookup(fqdn1 string, port int, fqdn2 string, mode Ma
 	for i, a := range aCandidates {
 		vals, err := cmds[i].Result()
 		if err != nil {
-			return nil, fmt.Errorf("lookup key %q: %w", s.key(a.Tag, a.Pattern, port), err)
+			return nil, fmt.Errorf("lookup key %q: %w", s.key(a.Tag, a.BucketIndex, a.Pattern, port), err)
 		}
 		for j, b := range bCandidates {
 			raw, ok := vals[j].(string)
