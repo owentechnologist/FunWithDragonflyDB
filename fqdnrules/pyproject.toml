@@ -1,0 +1,9 @@
+[project]
+name = "scratch"
+version = "0.1.0"
+requires-python = ">=3.9"
+dependencies = [
+    "redis",
+    "pytest",
+    "hiredis>=3.4.1",
+]

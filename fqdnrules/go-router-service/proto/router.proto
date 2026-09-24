@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package router;
+
+option go_package = "routerservice/proto";
+
+// Router is the wire contract a pure client speaks. A pure client knows
+// nothing about Redis, hash tags, or wildcard ranking -- it sends the fqdn
+// pair, the port, and the match mode, and gets back a match or a miss.
+service Router {
+  rpc Lookup(LookupRequest) returns (LookupResponse);
+}
+
+enum MatchMode {
+  SINGLE_LEVEL = 0; // RFC 6125: a wildcard substitutes exactly one label
+  MULTI_LEVEL = 1;  // a wildcard matches any descendant depth
+}
+
+message LookupRequest {
+  string fqdn1 = 1;
+  int32 port = 2;
+  string fqdn2 = 3;
+  MatchMode mode = 4;
+}
+
+message LookupResponse {
+  bool hit = 1;
+  string rule_id = 2;
+  string fqdn1_pattern = 3;
+  string fqdn2_pattern = 4;
+  int32 rank1 = 5; // lower is more specific
+  int32 rank2 = 6;
+}
