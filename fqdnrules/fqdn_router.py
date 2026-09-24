@@ -1,19 +1,22 @@
 """Redis/Dragonfly-backed 3-way (fqdn1, port, fqdn2) rule matcher.
 
-Storage: one Redis HASH per (fqdn1 pattern, port), hash-tagged into one of
-three co-location groups so a lookup touching several ancestor-candidate
-keys stays inside at most 3 Dragonfly/Redis-Cluster slots, never one slot
-per candidate:
+Storage: one Redis HASH per (fqdn1 pattern, port), hash-tagged so a lookup
+touching several ancestor-candidate keys stays inside a small, bounded
+number of Dragonfly/Redis-Cluster slots, never one slot per candidate:
 
-    r:{ns:<apex>}:<fqdn1_pattern>:<port>            -> HASH
-    r:{ns:__tld__:<tld>}:<fqdn1_pattern>:<port>     -> HASH
-    r:{ns:__global__}:<fqdn1_pattern>:<port>        -> HASH
+    r:{ns:<apex>}:<fqdn1_pattern>:<port>                          -> HASH
+    r:<ns>:{<token>}:<tag>:<bucket_index>:<fqdn1_pattern>:<port>  -> HASH
 
-The __tld__ and __global__ tiers are a single key each for every query, so
-a RuleStore built with num_buckets > 1 replicates those two tiers across
-that many keys instead (r:{ns:__global__:<i>}:...), written to all of them
-and read from one. The default num_buckets=1 keeps exactly the 3 names
-above, byte for byte.
+The apex tier (one key per registrable domain) is never bucketed. The
+__tld__ and __global__ tiers are a single logical key each for every query,
+so a RuleStore built with num_buckets > 1 replicates those two tiers across
+that many physical keys instead, written to all of them and read from one.
+<token> is a deterministic, CRC16-slot-targeted string from
+fqdn_slots.compute_bucket_table(num_buckets) -- the sole hashed content, so
+every replica of a given bucket index (across every tag family and
+namespace) lands on the same slot. The default num_buckets=1 keeps the
+__tld__/__global__ tiers on the apex-style unbucketed key form, byte for
+byte.
 
 Each hash maps fqdn2_pattern -> "<scope_char><rule_id>". fqdn2 is never a
 Redis key -- it's collapsed into a hash field, so a lookup costs
@@ -42,13 +45,13 @@ from fqdn_pattern import (
     InvalidFqdn,
     MatchMode,
     WildcardScope,
-    bucketed_tag,
     candidates,
     field_candidates,
     hash_tag,
     is_bucketed_tag,
     normalize_fqdn,
 )
+from fqdn_slots import compute_bucket_table
 
 LUA_LOOKUP = """
 -- KEYS[1..n]: candidate rule-hash keys for one hash-tag group, ascending specificity.
@@ -148,7 +151,17 @@ class RuleStore:
                     "the new count before querying, or use the count already on record"
                 )
 
-    def _key(self, tag: str, fqdn1_pattern: str, port: int) -> str:
+    def _key(self, tag: str, bucket_index: int, fqdn1_pattern: str, port: int) -> str:
+        """Physical key text for one candidate. A bucketed tier (tag is
+        __global__/__tld__:<x> and this store actually replicates, i.e.
+        num_buckets > 1) hashes only the deterministic slot-targeted token
+        for bucket_index -- namespace/tag/bucket_index/pattern/port all
+        stay outside the braces as plain key-body text. Anything else (the
+        apex tier, or a bucketable tag when num_buckets <= 1) keeps the
+        original unbucketed form, byte for byte."""
+        if is_bucketed_tag(tag) and self._num_buckets > 1:
+            token = compute_bucket_table(self._num_buckets).token(bucket_index)
+            return f"r:{self._namespace}:{{{token}}}:{tag}:{bucket_index}:{fqdn1_pattern}:{port}"
         return f"r:{{{self._namespace}:{tag}}}:{fqdn1_pattern}:{port}"
 
     def _bucketing_meta_key(self) -> str:
@@ -163,11 +176,8 @@ class RuleStore:
         only ever needs to check one."""
         base_tag = hash_tag(pattern)
         if is_bucketed_tag(base_tag) and self._num_buckets > 1:
-            return [
-                self._key(bucketed_tag(base_tag, self._num_buckets, i), pattern, port)
-                for i in range(self._num_buckets)
-            ]
-        return [self._key(base_tag, pattern, port)]
+            return [self._key(base_tag, i, pattern, port) for i in range(self._num_buckets)]
+        return [self._key(base_tag, 0, pattern, port)]
 
     def put(self, rule: Rule) -> None:
         """HSET the rule into its (fqdn1_pattern, port) hash. Idempotent:
@@ -240,7 +250,7 @@ class RuleStore:
         pipe = self._conn.pipeline(transaction=False)
         for tag in tags:
             group = groups[tag]
-            keys = [self._key(tag, c.pattern, port) for c in group]
+            keys = [self._key(tag, c.bucket_index, c.pattern, port) for c in group]
             kmulti = ",".join("1" if c.needs_multi else "0" for c in group)
             kexact = ",".join("1" if c.rank == 0 else "0" for c in group)
             pipe.evalsha(self._sha, len(keys), *keys, kmulti, kexact, fmulti, *fields)

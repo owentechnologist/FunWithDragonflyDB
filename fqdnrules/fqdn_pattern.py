@@ -67,11 +67,20 @@ class Candidate:
 
     Invariant: within a list returned by `candidates()`, rank is strictly
     increasing and index order IS precedence order (most specific first).
+
+    `tag` is always the unsuffixed base tag (hash_tag(pattern)); it never
+    carries bucket placement. `bucket_index` is which replica of a bucketed
+    tier (`__global__`/`__tld__:<x>`) this query's candidates fall into --
+    0 when the tag isn't bucketed, or when the store isn't bucketing at
+    all. The store layer (fqdn_router.py) is the one place that decides
+    what to do with (tag, bucket_index); this module never resolves it to
+    a physical key.
     """
     pattern: str
     rank: int
     needs_multi: bool  # True iff only reachable under MatchMode.MULTI_LEVEL
     tag: str
+    bucket_index: int = 0
 
 
 def normalize_fqdn(fqdn: str) -> str:
@@ -125,28 +134,20 @@ def is_bucketed_tag(tag: str) -> bool:
     return tag == "__global__" or tag.startswith("__tld__:")
 
 
-def bucketed_tag(base_tag: str, num_buckets: int, bucket_index: int) -> str:
-    """The concrete physical tag for one replica of a bucketed base tag.
-    num_buckets <= 1 returns base_tag unchanged (no ":0" suffix), so the
-    on-disk key format is byte-for-byte identical to the pre-bucketing
-    code whenever bucketing is disabled."""
-    if num_buckets <= 1:
-        return base_tag
-    return f"{base_tag}:{bucket_index}"
-
-
 def _candidate(
     pattern: str,
     rank: int,
     needs_multi: bool,
     *,
     bucket_index: int = 0,
-    num_buckets: int = 1,
 ) -> Candidate:
-    tag = hash_tag(pattern)
-    if is_bucketed_tag(tag):
-        tag = bucketed_tag(tag, num_buckets, bucket_index)
-    return Candidate(pattern=pattern, rank=rank, needs_multi=needs_multi, tag=tag)
+    return Candidate(
+        pattern=pattern,
+        rank=rank,
+        needs_multi=needs_multi,
+        tag=hash_tag(pattern),
+        bucket_index=bucket_index,
+    )
 
 
 def candidates(fqdn: str, mode: MatchMode, num_buckets: int = 1) -> list[Candidate]:
@@ -166,17 +167,11 @@ def candidates(fqdn: str, mode: MatchMode, num_buckets: int = 1) -> list[Candida
     labels = fqdn.split(".")
     n = len(labels)
     bucket_index = zlib.crc32(fqdn.encode()) % num_buckets if num_buckets > 1 else 0
-    result = [
-        _candidate(fqdn, rank=0, needs_multi=False, bucket_index=bucket_index, num_buckets=num_buckets)
-    ]
+    result = [_candidate(fqdn, rank=0, needs_multi=False, bucket_index=bucket_index)]
 
     if n >= 2:
         parent = ".".join(labels[1:])
-        result.append(
-            _candidate(
-                f"*.{parent}", rank=1, needs_multi=False, bucket_index=bucket_index, num_buckets=num_buckets
-            )
-        )
+        result.append(_candidate(f"*.{parent}", rank=1, needs_multi=False, bucket_index=bucket_index))
 
     if mode == MatchMode.MULTI_LEVEL:
         for k in range(2, n):
@@ -187,13 +182,10 @@ def candidates(fqdn: str, mode: MatchMode, num_buckets: int = 1) -> list[Candida
                     rank=k,
                     needs_multi=True,
                     bucket_index=bucket_index,
-                    num_buckets=num_buckets,
                 )
             )
 
-    result.append(
-        _candidate("*", rank=GLOBAL_RANK, needs_multi=False, bucket_index=bucket_index, num_buckets=num_buckets)
-    )
+    result.append(_candidate("*", rank=GLOBAL_RANK, needs_multi=False, bucket_index=bucket_index))
     return result
 
 

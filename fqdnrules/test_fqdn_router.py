@@ -14,6 +14,7 @@ import redis
 
 from fqdn_pattern import GLOBAL_RANK, InvalidFqdn, MatchMode, WildcardScope, candidates
 from fqdn_router import Rule, RuleStore
+from fqdn_slots import compute_bucket_table
 
 TEST_DB = 15
 
@@ -218,13 +219,9 @@ def test_bucketed_put_writes_the_global_rule_into_four_replica_keys(conn):
     store = RuleStore(conn, namespace="buckets", num_buckets=4)
     store.put(Rule(fqdn1="*", port=443, fqdn2="*", rule_id="rule:global"))
 
-    expected = [
-        "r:{buckets:__global__:0}:*:443",
-        "r:{buckets:__global__:1}:*:443",
-        "r:{buckets:__global__:2}:*:443",
-        "r:{buckets:__global__:3}:*:443",
-    ]
-    assert sorted(k.decode() for k in conn.keys("r:{buckets:__global__*")) == expected
+    table = compute_bucket_table(4)
+    expected = sorted(f"r:buckets:{{{table.token(i)}}}:__global__:{i}:*:443" for i in range(4))
+    assert sorted(k.decode() for k in conn.keys("r:buckets:*")) == expected
     for key in expected:
         assert conn.hget(key, "*") == b"Brule:global"
 
@@ -243,8 +240,9 @@ def test_bucketed_global_rule_matches_whichever_bucket_the_query_hashes_to(conn)
         assert m.rule_id == "rule:global"
         assert m.fqdn1_pattern == "*" and m.fqdn2_pattern == "*"
 
-    probed = {candidates(f, MatchMode.MULTI_LEVEL, num_buckets=4)[-1].tag for f in BUCKET_PROBE_FQDNS}
-    assert probed == {"__global__:0", "__global__:1", "__global__:2", "__global__:3"}
+    probed_candidates = [candidates(f, MatchMode.MULTI_LEVEL, num_buckets=4)[-1] for f in BUCKET_PROBE_FQDNS]
+    assert {c.tag for c in probed_candidates} == {"__global__"}
+    assert {c.bucket_index for c in probed_candidates} == {0, 1, 2, 3}
 
 
 def test_bucketed_delete_clears_every_replica(conn):
@@ -252,7 +250,7 @@ def test_bucketed_delete_clears_every_replica(conn):
     store.put(Rule(fqdn1="*", port=443, fqdn2="*", rule_id="rule:global"))
 
     assert store.delete("*", 443, "*") is True
-    assert conn.keys("r:{buckets:__global__*") == []
+    assert conn.keys("r:buckets:*") == []
     assert store.delete("*", 443, "*") is False
     for fqdn in BUCKET_PROBE_FQDNS:
         assert store.lookup(fqdn, 443, "backend.example.net", MatchMode.MULTI_LEVEL) is None
@@ -271,14 +269,9 @@ def test_reopening_a_namespace_under_a_different_num_buckets_raises(conn):
 
 
 def test_global_tier_bucket_index_varies_with_the_query_fqdn():
-    tags = [candidates(f, MatchMode.MULTI_LEVEL, num_buckets=8)[-1].tag for f in BUCKET_PROBE_FQDNS]
-    assert tags == [
-        "__global__:0",
-        "__global__:1",
-        "__global__:2",
-        "__global__:3",
-        "__global__:4",
-    ]
+    probed = [candidates(f, MatchMode.MULTI_LEVEL, num_buckets=8)[-1] for f in BUCKET_PROBE_FQDNS]
+    assert [c.tag for c in probed] == ["__global__"] * len(BUCKET_PROBE_FQDNS)
+    assert [c.bucket_index for c in probed] == [0, 1, 2, 3, 4]
 
 
 # ---------------------------------------------------------------------------
