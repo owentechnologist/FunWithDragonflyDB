@@ -143,39 +143,53 @@ func TestModeString(t *testing.T) {
 	}
 }
 
+// The global tier's tag is the same fixed string for every query; only
+// BucketIndex spreads the reads across replicas.
 func TestGlobalTierBucketIndexVariesWithQueryFqdn(t *testing.T) {
-	tagsFor := func(numBuckets int) []string {
-		var tags []string
+	indexesFor := func(numBuckets int) []int {
+		var indexes []int
 		for _, f := range bucketProbeFqdns {
 			cs := candidates(f, MultiLevel, numBuckets)
-			tags = append(tags, cs[len(cs)-1].Tag)
+			last := cs[len(cs)-1]
+			if last.Tag != "__global__" {
+				t.Errorf("numBuckets=%d: %s last tag = %q, want %q", numBuckets, f, last.Tag, "__global__")
+			}
+			indexes = append(indexes, last.BucketIndex)
 		}
-		return tags
+		return indexes
 	}
 
-	want8 := []string{"__global__:0", "__global__:1", "__global__:2", "__global__:3", "__global__:4"}
-	if got := tagsFor(8); !equalStrings(got, want8) {
-		t.Errorf("numBuckets=8 tags = %v, want %v", got, want8)
+	cases := []struct {
+		numBuckets int
+		want       []int
+	}{
+		{8, []int{0, 1, 2, 3, 4}},
+		{4, []int{0, 1, 2, 3, 0}},
+		{1, []int{0, 0, 0, 0, 0}},
 	}
-
-	want4 := []string{"__global__:0", "__global__:1", "__global__:2", "__global__:3", "__global__:0"}
-	if got := tagsFor(4); !equalStrings(got, want4) {
-		t.Errorf("numBuckets=4 tags = %v, want %v", got, want4)
-	}
-
-	want1 := []string{"__global__", "__global__", "__global__", "__global__", "__global__"}
-	if got := tagsFor(1); !equalStrings(got, want1) {
-		t.Errorf("numBuckets=1 tags = %v, want %v", got, want1)
+	for _, c := range cases {
+		got := indexesFor(c.numBuckets)
+		if len(got) != len(c.want) {
+			t.Fatalf("numBuckets=%d produced %d indexes, want %d", c.numBuckets, len(got), len(c.want))
+		}
+		for i := range c.want {
+			if got[i] != c.want[i] {
+				t.Errorf("numBuckets=%d bucket indexes = %v, want %v", c.numBuckets, got, c.want)
+				break
+			}
+		}
 	}
 }
 
+// Every candidate carries the query's bucket index, apex ones included; it is
+// router.go's key() that ignores it for the tiers that are never bucketed.
 func TestBucketedTldTierButUnbucketedApexTier(t *testing.T) {
-	cs := candidates("shop.omega.com", MultiLevel, 8)
+	cs := candidates("api.omega.net", MultiLevel, 8)
 	want := []Candidate{
-		{Pattern: "shop.omega.com", Rank: 0, NeedsMulti: false, Tag: "omega.com"},
-		{Pattern: "*.omega.com", Rank: 1, NeedsMulti: false, Tag: "omega.com"},
-		{Pattern: "*.com", Rank: 2, NeedsMulti: true, Tag: "__tld__:com:0"},
-		{Pattern: "*", Rank: 255, NeedsMulti: false, Tag: "__global__:0"},
+		{Pattern: "api.omega.net", Rank: 0, NeedsMulti: false, Tag: "omega.net", BucketIndex: 1},
+		{Pattern: "*.omega.net", Rank: 1, NeedsMulti: false, Tag: "omega.net", BucketIndex: 1},
+		{Pattern: "*.net", Rank: 2, NeedsMulti: true, Tag: "__tld__:net", BucketIndex: 1},
+		{Pattern: "*", Rank: 255, NeedsMulti: false, Tag: "__global__", BucketIndex: 1},
 	}
 	assertCandidates(t, cs, want)
 }
@@ -211,18 +225,6 @@ func TestIsBucketedTag(t *testing.T) {
 		if got := isBucketedTag(c.tag); got != c.want {
 			t.Errorf("isBucketedTag(%q) = %v, want %v", c.tag, got, c.want)
 		}
-	}
-}
-
-func TestBucketedTagLeavesBaseTagAloneWhenBucketingIsOff(t *testing.T) {
-	if got := bucketedTag("__global__", 1, 0); got != "__global__" {
-		t.Errorf("bucketedTag with numBuckets=1 = %q, want %q", got, "__global__")
-	}
-	if got := bucketedTag("__global__", 0, 0); got != "__global__" {
-		t.Errorf("bucketedTag with numBuckets=0 = %q, want %q", got, "__global__")
-	}
-	if got := bucketedTag("__tld__:com", 4, 3); got != "__tld__:com:3" {
-		t.Errorf("bucketedTag(__tld__:com, 4, 3) = %q, want %q", got, "__tld__:com:3")
 	}
 }
 

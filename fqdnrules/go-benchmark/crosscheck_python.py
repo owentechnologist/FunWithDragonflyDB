@@ -20,7 +20,11 @@ import os
 import sys
 from pathlib import Path
 
-sys.path.insert(0, "/Users/Shared/shared_github/scratch")
+# The reference implementation this harness checks the Go port against is the
+# one sitting beside it in this repo, not whatever copy happens to be on
+# PYTHONPATH -- an absolute path to a checkout elsewhere silently compares the
+# Go tree against a different revision of the Python side.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import redis
 
@@ -86,8 +90,13 @@ MODES = {"single": MatchMode.SINGLE_LEVEL, "multi": MatchMode.MULTI_LEVEL}
 
 def main() -> None:
     conn = redis.Redis(host="localhost", port=6379, db=DB)
-    for key in conn.keys(f"r:{{{NAMESPACE}:*"):
-        conn.delete(key)
+    # A namespace spans two key shapes: the apex tier hashes the namespace
+    # itself (r:{ns:<tag>}:...) while the bucketed tiers hash only the slot
+    # token and carry the namespace as a plain prefix (r:<ns>:{<token>}:...).
+    # Neither scan pattern finds the other's keys, so both are needed.
+    for pattern in (f"r:{{{NAMESPACE}:*", f"r:{NAMESPACE}:*"):
+        for key in conn.keys(pattern):
+            conn.delete(key)
 
     store = RuleStore(conn, namespace=NAMESPACE, num_buckets=NUM_BUCKETS)
     store.put_many(

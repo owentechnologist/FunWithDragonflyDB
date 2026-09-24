@@ -1,17 +1,21 @@
 // Redis/Dragonfly-backed 3-way (fqdn1, port, fqdn2) rule matcher.
 //
-// Storage: one Redis HASH per (fqdn1 pattern, port), hash-tagged into one of
-// three co-location groups so a lookup touching several ancestor-candidate
-// keys stays inside at most 3 Dragonfly/Redis-Cluster slots:
+// Storage: one Redis HASH per (fqdn1 pattern, port), hash-tagged so a lookup
+// touching several ancestor-candidate keys stays inside a small, bounded
+// number of Dragonfly/Redis-Cluster slots, never one slot per candidate:
 //
 //	r:{ns:<apex>}:<fqdn1_pattern>:<port>
-//	r:{ns:__tld__:<tld>}:<fqdn1_pattern>:<port>
-//	r:{ns:__global__}:<fqdn1_pattern>:<port>
+//	r:<ns>:{<token>}:<tag>:<bucket_index>:<fqdn1_pattern>:<port>
 //
-// The __tld__ and __global__ tiers are a single key each for every query, so a
-// RuleStore built with numBuckets > 1 replicates those two tiers across that
-// many keys instead, written to all of them and read from one. numBuckets=1
-// keeps exactly the 3 names above, byte for byte.
+// The apex tier (one key per registrable domain) is never bucketed. The
+// __tld__ and __global__ tiers are a single logical key each for every query,
+// so a RuleStore built with numBuckets > 1 replicates those two tiers across
+// that many physical keys instead, written to all of them and read from one.
+// <token> is a deterministic, CRC16-slot-targeted string from
+// ComputeBucketTable(numBuckets) in slots.go -- the sole hashed content, so
+// every replica of a given bucket index (across every tag family and
+// namespace) lands on the same slot. numBuckets=1 keeps the __tld__/__global__
+// tiers on the apex-style unbucketed key form, byte for byte.
 //
 // Each hash maps fqdn2_pattern to "<scope_char><rule_id>". fqdn2 is never a
 // Redis key, so a lookup costs |fqdn1 candidates| keys probed, not
@@ -96,7 +100,11 @@ type RuleStore struct {
 	conn       *redis.Client
 	namespace  string
 	numBuckets int
-	sha        string
+	// The slot-targeted token table for numBuckets, resolved once at
+	// construction. Nil exactly when this store does not bucket
+	// (numBuckets <= 1), which is what key() branches on.
+	bucketTable *BucketTable
+	sha         string
 }
 
 // PoolStats exposes the underlying go-redis connection pool's counters so the
@@ -122,11 +130,21 @@ func NewRuleStore(ctx context.Context, conn *redis.Client, namespace string, num
 	if numBuckets < 1 {
 		numBuckets = 1
 	}
+	var table *BucketTable
+	if numBuckets > 1 {
+		var err error
+		if table, err = ComputeBucketTable(numBuckets); err != nil {
+			return nil, fmt.Errorf("resolving bucket tokens: %w", err)
+		}
+	}
 	sha, err := conn.ScriptLoad(ctx, luaLookup).Result()
 	if err != nil {
 		return nil, fmt.Errorf("loading lookup script: %w", err)
 	}
-	s := &RuleStore{ctx: ctx, conn: conn, namespace: namespace, numBuckets: numBuckets, sha: sha}
+	s := &RuleStore{
+		ctx: ctx, conn: conn, namespace: namespace,
+		numBuckets: numBuckets, bucketTable: table, sha: sha,
+	}
 
 	// Checked unconditionally, including numBuckets=1: a reader left at the
 	// default against a namespace some other writer already bucketed would
@@ -154,7 +172,18 @@ func NewRuleStore(ctx context.Context, conn *redis.Client, namespace string, num
 	return s, nil
 }
 
-func (s *RuleStore) key(tag, fqdn1Pattern string, port int) string {
+// Physical key text for one candidate. A bucketed tier (tag is
+// __global__/__tld__:<x> and this store actually replicates) hashes only the
+// deterministic slot-targeted token for bucketIndex; namespace, tag,
+// bucketIndex, pattern and port all stay outside the braces as plain key-body
+// text, so a SCAN r:<ns>:* prefix scan still finds them. Anything else (the
+// apex tier, or a bucketable tag when numBuckets <= 1) keeps the original
+// unbucketed form, byte for byte.
+func (s *RuleStore) key(tag string, bucketIndex int, fqdn1Pattern string, port int) string {
+	if s.bucketTable != nil && isBucketedTag(tag) {
+		return fmt.Sprintf("r:%s:{%s}:%s:%d:%s:%d",
+			s.namespace, s.bucketTable.Token(bucketIndex), tag, bucketIndex, fqdn1Pattern, port)
+	}
 	return fmt.Sprintf("r:{%s:%s}:%s:%d", s.namespace, tag, fqdn1Pattern, port)
 }
 
@@ -168,14 +197,14 @@ func (s *RuleStore) bucketingMetaKey() string {
 // while a lookup (whose candidate already picked one bucket) checks only one.
 func (s *RuleStore) keysForPattern(pattern string, port int) []string {
 	baseTag := hashTag(pattern)
-	if isBucketedTag(baseTag) && s.numBuckets > 1 {
+	if isBucketedTag(baseTag) && s.bucketTable != nil {
 		keys := make([]string, s.numBuckets)
 		for i := range keys {
-			keys[i] = s.key(bucketedTag(baseTag, s.numBuckets, i), pattern, port)
+			keys[i] = s.key(baseTag, i, pattern, port)
 		}
 		return keys
 	}
-	return []string{s.key(baseTag, pattern, port)}
+	return []string{s.key(baseTag, 0, pattern, port)}
 }
 
 func (s *RuleStore) Put(rule Rule) error {
@@ -298,7 +327,7 @@ func (s *RuleStore) Lookup(fqdn1 string, port int, fqdn2 string, mode MatchMode)
 		group := groups[tag]
 		keys := make([]string, len(group))
 		for j, c := range group {
-			keys[j] = s.key(tag, c.Pattern, port)
+			keys[j] = s.key(tag, c.BucketIndex, c.Pattern, port)
 		}
 		args := append([]interface{}{multiBits(group), exactBits(group), fmulti}, fields...)
 		cmds[i] = pipe.EvalSha(s.ctx, s.sha, keys, args...)

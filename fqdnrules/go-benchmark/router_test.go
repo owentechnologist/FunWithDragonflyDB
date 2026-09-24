@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 	"testing"
@@ -384,13 +385,19 @@ func TestBucketedPutWritesGlobalRuleIntoFourReplicaKeys(t *testing.T) {
 	}
 	mustPut(t, store, Rule{Fqdn1: "*", Port: 443, Fqdn2: "*", RuleID: "rule:global"})
 
-	want := []string{
-		"r:{buckets:__global__:0}:*:443",
-		"r:{buckets:__global__:1}:*:443",
-		"r:{buckets:__global__:2}:*:443",
-		"r:{buckets:__global__:3}:*:443",
+	table, err := ComputeBucketTable(4)
+	if err != nil {
+		t.Fatalf("ComputeBucketTable(4): %v", err)
 	}
-	keys, err := conn.Keys(ctx, "r:{buckets:__global__*").Result()
+	want := make([]string, 4)
+	for i := range want {
+		want[i] = fmt.Sprintf("r:buckets:{%s}:__global__:%d:*:443", table.Token(i), i)
+	}
+	sort.Strings(want)
+	// The bucketed tiers keep the namespace outside the braces, so a plain
+	// prefix scan still enumerates them; the apex tier's r:{ns:...} keys and
+	// the meta key deliberately fall outside this pattern.
+	keys, err := conn.Keys(ctx, "r:buckets:*").Result()
 	if err != nil {
 		t.Fatalf("KEYS: %v", err)
 	}
@@ -416,6 +423,49 @@ func TestBucketedPutWritesGlobalRuleIntoFourReplicaKeys(t *testing.T) {
 	wantApex := []string{"r:{buckets:foo.com}:api.foo.com:443"}
 	if !equalStrings(apexKeys, wantApex) {
 		t.Errorf("apex keys = %v, want %v", apexKeys, wantApex)
+	}
+}
+
+// numBuckets=1 must leave the catch-all tiers on the pre-bucketing key names,
+// byte for byte, so an existing unbucketed dataset stays readable.
+func TestUnbucketedStoreKeepsTheOriginalCatchAllKeyNames(t *testing.T) {
+	ctx, conn, store := newTestStore(t)
+	mustPut(t, store, Rule{Fqdn1: "*", Port: 443, Fqdn2: "*", RuleID: "rule:global"})
+	mustPut(t, store, Rule{Fqdn1: "*.com", Port: 8443, Fqdn2: "*", RuleID: "rule:tld"})
+
+	keys, err := conn.Keys(ctx, "r:*").Result()
+	if err != nil {
+		t.Fatalf("KEYS: %v", err)
+	}
+	sort.Strings(keys)
+	want := []string{"r:{test:__global__}:*:443", "r:{test:__tld__:com}:*.com:8443"}
+	if !equalStrings(keys, want) {
+		t.Errorf("keys = %v, want %v", keys, want)
+	}
+}
+
+// The point of the token: every key a single query declares for a bucketed
+// tier must hash into that query's own bucket's exclusive slot range, so the
+// replicas really do land on different Dragonfly threads.
+func TestBucketedKeysLandInTheirOwnBucketsSlotRange(t *testing.T) {
+	ctx, conn := newTestConn(t)
+	const numBuckets = 8
+	store, err := NewRuleStore(ctx, conn, "buckets", numBuckets)
+	if err != nil {
+		t.Fatalf("NewRuleStore: %v", err)
+	}
+	for _, fqdn := range bucketProbeFqdns {
+		for _, c := range candidates(fqdn, MultiLevel, numBuckets) {
+			if !isBucketedTag(c.Tag) {
+				continue
+			}
+			key := store.key(c.Tag, c.BucketIndex, c.Pattern, 443)
+			lo, hi := SlotRange(c.BucketIndex, numBuckets)
+			if got := KeySlot(key); got < lo || got >= hi {
+				t.Errorf("%s: key %q hashes to slot %d, outside bucket %d's range [%d, %d)",
+					fqdn, key, got, c.BucketIndex, lo, hi)
+			}
+		}
 	}
 }
 
@@ -455,7 +505,7 @@ func TestBucketedDeleteClearsEveryReplica(t *testing.T) {
 		t.Error("first Delete = false, want true")
 	}
 
-	keys, err := conn.Keys(ctx, "r:{buckets:__global__*").Result()
+	keys, err := conn.Keys(ctx, "r:buckets:*").Result()
 	if err != nil {
 		t.Fatalf("KEYS: %v", err)
 	}
