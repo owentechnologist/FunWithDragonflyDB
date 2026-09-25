@@ -2,6 +2,8 @@
 
 FastAPI + [fastapi-redis-sdk](https://github.com/redis/fastapi-redis-sdk) backed by Dragonfly.
 
+![fastapi-snacks-dfly-demo](./snacks_fastapisdk_demo.gif)
+
 ## Run
 
 ```
