@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Snack Sales Leaderboard</title>
+<style>
+  :root {
+    --apples: #e0554f;
+    --bananas: #e8b23b;
+    --ice-cream: #4f8fe0;
+    --bg: #0f1117;
+    --panel: #171a23;
+    --border: #2a2e3a;
+    --text: #e8e9ed;
+    --muted: #9aa0ad;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 24px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  h1 { font-size: 1.25rem; font-weight: 600; margin: 0 0 4px; }
+  p.sub { color: var(--muted); margin: 0 0 20px; font-size: 0.9rem; }
+  .panels {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+  }
+  .panel {
+    flex: 1 1 320px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+  }
+  .panel h2 {
+    font-size: 1rem;
+    margin: 0 0 2px;
+  }
+  .panel .note {
+    color: var(--muted);
+    font-size: 0.8rem;
+    margin: 0 0 16px;
+  }
+  .row {
+    display: grid;
+    grid-template-columns: 90px 1fr 48px;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+  .row .label { font-size: 0.9rem; }
+  .row .count { text-align: right; font-variant-numeric: tabular-nums; }
+  .bar-track {
+    background: #0000;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    height: 18px;
+    overflow: hidden;
+  }
+  .bar-fill {
+    height: 100%;
+    width: 0%;
+    transition: width 0.4s ease;
+  }
+  .apples .bar-fill { background: var(--apples); }
+  .bananas .bar-fill { background: var(--bananas); }
+  .ice-cream .bar-fill { background: var(--ice-cream); }
+</style>
+</head>
+<body>
+  <h1>Snack Sales Leaderboard</h1>
+  <p class="sub">Backed by Dragonfly via fastapi-redis-sdk. Apples 1/s, Bananas 2/s, Ice-Cream 10/s -- capped by a DI rate limiter.</p>
+  <div class="panels">
+    <section class="panel">
+      <h2>Live</h2>
+      <p class="note">Direct read of the snacks_sold service.</p>
+      <div id="live"></div>
+    </section>
+    <section class="panel">
+      <h2>Cached (~5s delayed)</h2>
+      <p class="note">Served through the DI cache dependency.</p>
+      <div id="cached"></div>
+    </section>
+  </div>
+
+<script>
+  const SNACKS = ["Apples", "Bananas", "Ice-Cream"];
+
+  function slug(snack) {
+    return snack.toLowerCase().replace(/[^a-z]+/g, "-");
+  }
+
+  function render(container, rows) {
+    const maxCount = Math.max(1, ...rows.map(r => r.count));
+    const bySnack = Object.fromEntries(rows.map(r => [r.snack, r.count]));
+    container.innerHTML = SNACKS.map(snack => {
+      const count = bySnack[snack] ?? 0;
+      const pct = Math.round((count / maxCount) * 100);
+      return `
+        <div class="row ${slug(snack)}">
+          <span class="label">${snack}</span>
+          <span class="bar-track"><span class="bar-fill" style="width:${pct}%"></span></span>
+          <span class="count">${count}</span>
+        </div>`;
+    }).join("");
+  }
+
+  async function poll(url, elementId, intervalMs) {
+    const el = document.getElementById(elementId);
+    async function tick() {
+      try {
+        const res = await fetch(url, { cache: "no-store" });
+        render(el, await res.json());
+      } catch (err) {
+        console.error(`failed to poll ${url}`, err);
+      }
+    }
+    tick();
+    setInterval(tick, intervalMs);
+  }
+
+  poll("/api/leaderboard", "live", 500);
+  poll("/api/leaderboard/cached", "cached", 1000);
+</script>
+</body>
+</html>

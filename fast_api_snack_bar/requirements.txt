@@ -1,0 +1,4 @@
+fastapi
+uvicorn[standard]
+fastapi-redis-sdk
+httpx
