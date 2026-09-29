@@ -75,7 +75,13 @@ pipe.execute()  # atomic
 ### Lua Scripting
 Dragonfly supports Lua scripting with one important difference:
 
-**⚠️ Dragonfly enforces strict key declaration.** All keys accessed by a Lua script MUST be declared in the `KEYS` array. Scripts that access undeclared keys will fail on first invocation — but Dragonfly auto-mitigates by setting an `undeclared_keys` flag for that script SHA, so subsequent calls succeed.
+**⚠️ Dragonfly enforces strict key declaration.** All keys accessed by a Lua script MUST be declared in the `KEYS` array. Scripts that access undeclared keys fail with `-ERR script tried accessing undeclared key` — **whether that failure self-heals on retry depends on server configuration, not just the Dragonfly version:**
+
+- **Dragonfly Cloud (managed):** enables `--lua_allow_undeclared_auto_correct` by default. With it on, a script's first undeclared-key access fails, but Dragonfly then auto-corrects and subsequent calls (same script) succeed — the original behavior this doc described.
+- **Self-hosted (default flags), including a plain `dragonflydb/dragonfly` container:** this flag is **not** on by default. Verified directly against `df-v1.39.0` run this way — 3 consecutive identical retries of the same script all failed with the same error, no auto-heal. If you self-host and want the Cloud-like retry behavior, pass `--lua_allow_undeclared_auto_correct` yourself at startup.
+- **Portable option that works regardless of server config:** prepend the literal first line `--!df flags=allow-undeclared-keys` to a script whose keys genuinely aren't known until runtime (e.g. it does its own `SCAN`). It's an ordinary Lua comment, so it's silently ignored (harmless) on vanilla Redis, but on Dragonfly it disables the declaration check for that specific script call — no retry, no server flag, needed.
+
+Prefer declaring real keys via `KEYS[]` whenever the key names ARE known ahead of time; reach for one of the above only for genuinely dynamic key discovery.
 python
 # Correct — all keys declared
 script = """
@@ -95,7 +101,7 @@ script = """
 local key = 'dynamic:' .. ARGV[1]
 return redis.call('GET', key)  -- undeclared key!
 """
-**If using BullMQ, Sidekiq, or similar queue frameworks:** Their Lua scripts may access dynamic keys. Dragonfly handles this gracefully after the first failure per script SHA — but be aware of initial error bursts on first deployment.
+**If using BullMQ, Sidekiq, or similar queue frameworks:** Their Lua scripts may access dynamic keys. On Dragonfly Cloud this self-heals after an initial error burst per script (via `--lua_allow_undeclared_auto_correct`, on by default there); self-hosting without that flag means those errors are hard failures, not retryable ones — either set the flag yourself or confirm the framework's Dragonfly-compatible fork adds the `--!df flags=allow-undeclared-keys` directive to its scripts.
 
 ### Pub/Sub
 Works identically to Redis. Dragonfly's multi-threaded design handles high fan-out more efficiently.
@@ -146,6 +152,13 @@ r.expire('session:abc', 1800)
   # Worse for partial access — must deserialize entire blob
   r.set('user:123', json.dumps({'name': 'Owen', 'role': 'eng', 'score': 42}))
  
+### Inspecting Key Size & Type
+- `DBSIZE` — total key count; `SCAN cursor TYPE <type>` — iterate keys of one type (never use `KEYS *` in production).
+- `TYPE key` — data type. `STRLEN`/`LLEN`/`HLEN`/`SCARD`/`ZCARD`/`XLEN` — cheap element counts per type.
+- `MEMORY USAGE key` — estimated bytes for a key. **Gotcha:** the `SAMPLES` argument is accepted but not actually implemented — it always walks the full structure, so it's exact but can be slow on huge aggregates.
+- `DEBUG OBJECT key` — encoding, `serializedlength`, `refcount`, etc.
+- **⚠️ `OBJECT ENCODING`/`FREQ`/`IDLETIME`/`REFCOUNT` are all unsupported in Dragonfly** (unlike Redis). Use `DEBUG OBJECT` for encoding and `MEMORY USAGE` for size instead.
+
 ## 5. Tiered Storage (SSD Data Tiering)
 
 Dragonfly can offload values to NVMe/SSD, reducing RAM usage by 2-5x while maintaining sub-millisecond latency.
@@ -183,6 +196,25 @@ For datasets that truly need horizontal scaling beyond one machine.
   r.set('{user:123}:sessions', session_data)
   # Both land on the same shard — safe for MULTI/EXEC
  
+### Per-Slot Stats
+`DFLYCLUSTER GETSLOTINFO SLOTS <slot>[-<slot2>]...` returns per-slot `key_count`, `total_reads`, `total_writes`, and `memory_bytes` — useful for spotting hot/oversized slots. Only valid when cluster mode (emulated or real) is enabled.
+python
+r.execute_command('DFLYCLUSTER', 'GETSLOTINFO', 'SLOTS', '0-100')
+### Slot Migration (Rebalancing)
+To move a slot range to another node — e.g. to relieve a hot node found via `GETSLOTINFO`, or when adding/removing nodes — real (non-emulated) cluster mode moves data via `DFLYCLUSTER CONFIG`, not the standard Redis `MIGRATE` command:
+
+1. Push `DFLYCLUSTER CONFIG` to source and target with a `migrations` field:
+   json
+   "migrations": [{"slot_ranges": [{"start": 1000, "end": 8000}], "node_id": "target_node_id", "ip": "localhost", "port": 30001}]
+   
+2. This drives an internal `DFLYMIGRATE` handshake (`INIT` → per-shard `FLOW` → data transfer → `ACK`) that streams data to the target while the source keeps serving traffic.
+3. Poll `DFLYCLUSTER SLOT-MIGRATION-STATUS` until `FINISHED`.
+4. Push a follow-up `DFLYCLUSTER CONFIG` with updated `slot_ranges` to finalize — **this permanently erases the migrated slots' data from the source**.
+
+Multiple migrations can run concurrently, but only one at a time between any given pair of nodes. DragonflyDB Cloud automates this whole workflow.
+
+**⚠️ Gotcha:** there's a known issue where very large lists don't migrate fully between cluster nodes — test with production-sized list values before relying on migration for hosts holding huge lists.
+
 ## 7. Replication & High Availability
 
 Dragonfly supports master-replica replication compatible with Redis replication protocol.
