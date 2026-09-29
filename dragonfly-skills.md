@@ -213,7 +213,6 @@ To move a slot range to another node — e.g. to relieve a hot node found via `G
 
 Multiple migrations can run concurrently, but only one at a time between any given pair of nodes. DragonflyDB Cloud automates this whole workflow.
 
-**⚠️ Gotcha:** there's a known issue where very large lists don't migrate fully between cluster nodes — test with production-sized list values before relying on migration for hosts holding huge lists.
 
 ## 7. Replication & High Availability
 
@@ -289,7 +288,7 @@ bash
 ## 10. Migration from Redis
 
 ### What works out of the box:
-- All standard Redis commands (strings, hashes, lists, sets, sorted sets, streams, pub/sub, Lua scripting)
+- All standard Redis commands (json, search, bloom, strings, hashes, lists, sets, sorted sets, streams, pub/sub, Lua scripting)
 - RDB file import — `dragonfly --dbfilename /path/to/dump.rdb`
 - Redis Cluster clients (with `--cluster_mode=emulated`)
 - Sentinel-compatible clients
@@ -297,7 +296,7 @@ bash
 ### What to watch for:
 - **Lua scripts accessing undeclared keys** — will fail once then auto-heal (see Section 3)
 - **ACLs are NOT replicated** — configure on each node separately
-- **Module commands** — Dragonfly has native implementations of some Redis modules (Search, JSON, Bloom) but not all. Check compatibility.
+- **Module commands** — Dragonfly has native implementations of these Redis modules (Search, JSON, Bloom) but not all. Check compatibility.
 - **`io_uring` dependency** — Dragonfly requires modern Linux. Not available on macOS for production (use Docker).
 
 ### Migration approaches:
@@ -315,7 +314,7 @@ bash
 
 ❌ **Don't run backups during full sync.** If a node is replicating (initial full sync), triggering a backup snapshot simultaneously can cause OOM — both operations consume significant memory.
 
-❌ **Don't store everything as serialized JSON strings.** Use native Redis data structures (hashes, sorted sets, lists) — they're more memory-efficient and allow partial operations.
+❌ **Don't store everything as serialized strings.** Use native Redis data structures (JSON,hashes, sorted sets, lists) — they're more memory-efficient and allow partial operations.
 
 ❌ **Don't set maxmemory equal to physical RAM.** Leave headroom for RSS overhead, OS buffers, replication, and snapshots. A good rule: `maxmemory` ≤ 70-80% of available RAM.
 
